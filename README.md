@@ -29,6 +29,7 @@ Camera, system file picker, export destinations and sharing targets still requir
 
 - Compose Home, Documents, Tools and Settings screens.
 - Website-inspired mobile design: Scanify header, search, eight Quick Tools cards, gradient scan action and five-position navigation with a floating scan button. Unimplemented tools show an availability dialog.
+- Website-style Documents category chips, quick actions, compact PDF rows and recent/oldest sorting. Review uses a full-screen gray stage, filter thumbnails and teal save action. PDF reader has a white header, page controls and bottom action toolbar. Settings matches the workspace/privacy card layout with native storage wording. Unsupported crop/OCR, PDF edit/sign/add-page, folders/favorites and dark appearance show availability dialogs.
 - System camera capture and multiple image import.
 - Review, rotate all pages, optional grayscale and remove pages.
 - Create multipage A4 PDFs using Android PdfDocument.
