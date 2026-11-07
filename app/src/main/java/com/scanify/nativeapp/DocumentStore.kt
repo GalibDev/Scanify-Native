@@ -30,7 +30,7 @@ class DocumentStore(private val context: Context) {
  }
  fun file(doc: ScanDocument) = File(root, "${doc.id}.pdf")
  fun rename(doc: ScanDocument, name: String) { require(name.isNotBlank()); write(list().map { if (it.id == doc.id) it.copy(name = name.trim()) else it }) }
- fun delete(doc: ScanDocument) { write(list().filterNot { it.id == doc.id }); file(doc).delete() }
+ fun delete(doc: ScanDocument) { write(list().filterNot { it.id == doc.id }); file(doc).delete(); (0 until doc.pages).forEach { File(root, "${doc.id}-$it.jpg").delete() } }
  fun bitmap(uri: Uri): Bitmap = context.contentResolver.openInputStream(uri).use { input ->
   requireNotNull(input)
   val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -64,6 +64,9 @@ class DocumentStore(private val context: Context) {
      if (grayscale) paint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
      page.canvas.drawBitmap(image, null, RectF((595-width)/2, (842-height)/2, (595+width)/2, (842+height)/2), paint)
      pdf.finishPage(page)
+     val preview = if (grayscale) Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888).also { Canvas(it).drawBitmap(image, 0f, 0f, paint) } else image
+     File(root, "${doc.id}-$i.jpg").outputStream().use { preview.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+     if (preview !== image) preview.recycle()
      if (image !== original) image.recycle()
      original.recycle()
     }
@@ -71,6 +74,6 @@ class DocumentStore(private val context: Context) {
    } finally { pdf.close() }
    write(list() + doc)
    return doc
-  } catch (error: Exception) { target.delete(); throw error }
+  } catch (error: Exception) { target.delete(); uris.indices.forEach { File(root, "${doc.id}-$it.jpg").delete() }; throw error }
  }
 }

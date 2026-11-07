@@ -1,6 +1,7 @@
 package com.scanify.nativeapp
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -26,6 +27,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,45 +110,28 @@ internal fun ScanReviewScreen(
 internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> Unit, onRename: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit, onUnavailable: (String) -> Unit) {
  var page by rememberSaveable(doc.id) { mutableIntStateOf(0) }
  var more by remember { mutableStateOf(false) }
+ var grid by rememberSaveable(doc.id) { mutableStateOf(false) }
+ val maxPreviewHeight = (LocalConfiguration.current.screenHeightDp * 0.53f).dp
  var renderError by remember { mutableStateOf(false) }
  val bitmap by produceState<Bitmap?>(null, doc.id, page) {
   renderError = false
   value = withContext(Dispatchers.IO) { runCatching {
+   val sourcePreview = File(file.parentFile, "${doc.id}-$page.jpg")
+   if (sourcePreview.exists()) BitmapFactory.decodeFile(sourcePreview.absolutePath) ?: error("Cannot decode preview") else
    PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
     renderer.openPage(page).use { pdf -> Bitmap.createBitmap(850, 1202, Bitmap.Config.ARGB_8888).also { image -> image.eraseColor(android.graphics.Color.WHITE); pdf.render(image, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } }
    }
   }.getOrElse { renderError = true; null } }
  }
- Column(Modifier.fillMaxSize().background(Color(0xFFF7F4FF))) {
-  Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 4.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-   IconButton(onClick = onBack) { WebIcon("back", color = WebText, description = "Back to documents") }
-   Text(doc.name, Modifier.weight(1f).clickable(onClick = onRename), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-   Surface(shape = RoundedCornerShape(5.dp), border = BorderStroke(1.dp, WebLine), color = Color.White) { Text("PDF", Modifier.padding(6.dp), fontSize = 11.sp) }
-   IconButton(onClick = onSave) { WebIcon("download", Modifier.size(21.dp), ReaderTeal, "Save PDF") }
-  }
-  Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-   Box(Modifier.fillMaxWidth().heightIn(min = 300.dp).aspectRatio(595f/842).background(Color.White), contentAlignment = Alignment.Center) {
-    bitmap?.let { Image(it.asImageBitmap(), "PDF page ${page + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
-     ?: Text(if (renderError) "Preview unavailable. Save or share the PDF to open it." else "Loading page…", Modifier.padding(24.dp), color = WebMuted)
-   }
-   Row(Modifier.fillMaxWidth().background(Color.White), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-    IconButton(onClick = { page-- }, enabled = page > 0) { WebIcon("left", Modifier.size(19.dp), if (page > 0) WebText else WebMuted, "Previous PDF page") }
-    Text("${page + 1} / ${doc.pages}", fontSize = 13.sp)
-    IconButton(onClick = { page++ }, enabled = page + 1 < doc.pages) { WebIcon("right", Modifier.size(19.dp), if (page + 1 < doc.pages) WebText else WebMuted, "Next PDF page") }
-   }
-   Row(Modifier.fillMaxWidth().height(54.dp).background(Color.White).clickable { onUnavailable("Add Page") }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-    Box(Modifier.size(22.dp).background(ReaderTeal, CircleShape), contentAlignment = Alignment.Center) { WebIcon("plus", Modifier.size(17.dp), Color.White) }
-    Text(" Add Page", fontSize = 15.sp)
-   }
-  }
-  HorizontalDivider(color = WebLine)
-  Row(Modifier.fillMaxWidth().background(Color.White).padding(6.dp), horizontalArrangement = Arrangement.SpaceAround) {
-   ToolAction("camera", "Add") { onUnavailable("Add Page") }
-   ToolAction("edit", "Edit") { onUnavailable("PDF editing") }
-   ToolAction("share", "Share", color = ReaderTeal, onClick = onShare)
-   ToolAction("edit", "Sign") { onUnavailable("Signature") }
+ Column(Modifier.fillMaxSize().background(Color(0xFFF7F7F7))) {
+  Row(Modifier.fillMaxWidth().height(62.dp).background(Color.White).padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+   IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) { WebIcon("left", Modifier.size(23.dp), Color(0xFF292929), "Back to documents") }
+   Text(doc.name, Modifier.weight(1f).clickable(onClick = onRename).padding(end = 4.dp), fontSize = 16.sp, color = Color(0xFF292929), fontWeight = FontWeight.Normal, textDecoration = TextDecoration.Underline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+   Surface(onClick = { onUnavailable("Tags") }, shape = RoundedCornerShape(4.dp), border = BorderStroke(1.dp, Color(0xFFDDDDDD)), color = Color.White) { Text("Tag +", Modifier.padding(horizontal = 5.dp, vertical = 3.dp), fontSize = 11.sp, color = Color.Gray) }
+   IconButton(onClick = { grid = !grid }, modifier = Modifier.size(34.dp)) { WebIcon("grid", Modifier.size(20.dp), if(grid) ReaderTeal else Color(0xFF292929), "Show pages") }
+   IconButton(onClick = { onUnavailable("Page selection") }, modifier = Modifier.size(34.dp)) { WebIcon("select", Modifier.size(21.dp), Color(0xFF292929), "Select pages") }
    Box {
-    ToolAction("more", "More") { more = true }
+    IconButton(onClick = { more = true }, modifier = Modifier.size(34.dp)) { WebIcon("more", Modifier.size(23.dp), Color(0xFF292929), "More document actions") }
     DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
      DropdownMenuItem(text = { Text("Save PDF") }, onClick = { more = false; onSave() })
      DropdownMenuItem(text = { Text("Rename") }, onClick = { more = false; onRename() })
@@ -153,7 +139,48 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
     }
    }
   }
+  Box(Modifier.fillMaxWidth().weight(1f)) {
+   Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    if (grid) LazyRow(Modifier.fillMaxWidth().background(Color.White).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+     items((0 until doc.pages).toList()) { index -> FilterChip(selected = page == index, onClick = { page = index; grid = false }, label = { Text("Page ${index + 1}") }) }
+    }
+    val image = bitmap
+    if (image != null) {
+     val ratio = image.width.toFloat() / image.height
+     BoxWithConstraints(Modifier.fillMaxWidth().background(Color.White)) {
+      val naturalHeight = maxWidth / ratio
+      Image(image.asImageBitmap(), "PDF page ${page + 1}", Modifier.fillMaxWidth().height(minOf(naturalHeight, maxPreviewHeight)), contentScale = ContentScale.Fit)
+     }
+    } else Box(Modifier.fillMaxWidth().height(220.dp).background(Color.White), contentAlignment = Alignment.Center) {
+     Text(if (renderError) "Preview unavailable. Save or share the PDF to open it." else "Loading page…", Modifier.padding(24.dp), color = WebMuted)
+    }
+    if (doc.pages > 1) Row(Modifier.fillMaxWidth().background(Color.White), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+     IconButton(onClick = { page-- }, enabled = page > 0) { WebIcon("left", Modifier.size(19.dp), if (page > 0) Color.DarkGray else WebMuted, "Previous PDF page") }
+     Text("${page + 1} / ${doc.pages}", fontSize = 13.sp)
+     IconButton(onClick = { page++ }, enabled = page + 1 < doc.pages) { WebIcon("right", Modifier.size(19.dp), if (page + 1 < doc.pages) Color.DarkGray else WebMuted, "Next PDF page") }
+    }
+    Row(Modifier.fillMaxWidth().height(62.dp).background(Color.White).clickable { onUnavailable("Add Page") }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+     Box(Modifier.size(20.dp).background(Color(0xFF20B5A8), CircleShape), contentAlignment = Alignment.Center) { WebIcon("plus", Modifier.size(15.dp), Color.White) }
+     Text("  Add Page", fontSize = 16.sp, color = Color(0xFF666666))
+    }
+   }
+   Surface(onClick = { onUnavailable("AI assistance") }, modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(43.dp), shape = CircleShape, color = Color.White, border = BorderStroke(1.5.dp, Color(0xFF13B4A4))) {
+    Box(contentAlignment = Alignment.Center) { Text("AI✦", color = Color(0xFF13B4A4), fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+   }
+  }
+  HorizontalDivider(color = Color(0xFFF0F0F0))
+  Row(Modifier.fillMaxWidth().background(Color.White).height(74.dp).padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.Top) {
+   ToolAction("camera", "Add", color = Color(0xFF292929)) { onUnavailable("Add Page") }
+   ToolAction("edit", "Edit", color = Color(0xFF292929)) { onUnavailable("PDF editing") }
+   ToolAction("share", "Share", color = Color(0xFF292929), onClick = onShare)
+   Column(Modifier.widthIn(min = 48.dp).clickable { onUnavailable("To Word") }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text("Word", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF292929), modifier = Modifier.height(24.dp))
+    Text("To Word", fontSize = 11.sp, color = Color(0xFF292929))
+   }
+   ToolAction("sign", "Sign", color = Color(0xFF292929)) { onUnavailable("Signature") }
+  }
  }
+
 }
 
 @Composable

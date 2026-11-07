@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
    export.launch(doc.name.replace('/', '_').replace('\\', '_') + ".pdf")
   }
   Scaffold(
-   containerColor = Background,
+   containerColor = if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
     if (draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)

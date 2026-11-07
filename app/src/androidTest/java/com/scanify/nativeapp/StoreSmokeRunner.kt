@@ -29,6 +29,12 @@ class StoreSmokeRunner : Instrumentation() {
    check(store.list().isEmpty())
    val doc = store.create(listOf(Uri.fromFile(image), Uri.fromFile(image)), "Test scan", 90, true)
    check(doc.pages == 2 && store.file(doc).length() > 0)
+   val previewFile = File(store.file(doc).parentFile, "${doc.id}-0.jpg")
+   val preview = android.graphics.BitmapFactory.decodeFile(previewFile.absolutePath)
+   check(preview != null && preview.width == 80 && preview.height == 120) { "Preview must preserve the rotated image proportions" }
+   val previewPixel = preview.getPixel(40, 60)
+   check(kotlin.math.abs(Color.red(previewPixel) - Color.green(previewPixel)) <= 3) { "Preview must match the grayscale PDF" }
+   preview.recycle()
    check(DocumentStore(isolated).list().single().id == doc.id)
    PdfRenderer(ParcelFileDescriptor.open(store.file(doc), ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
     check(renderer.pageCount == 2)
@@ -45,6 +51,7 @@ class StoreSmokeRunner : Instrumentation() {
    check(store.list().single().name == "Renamed")
    store.delete(doc)
    check(store.list().isEmpty() && !store.file(doc).exists())
+   check(!previewFile.exists()) { "Deleting the document must remove its previews" }
    results.putString("stream", "PASS: multipage PDF, grayscale rendering, library persistence, rename and delete\n")
    finish(Activity.RESULT_OK, results)
   } catch (error: Throwable) {

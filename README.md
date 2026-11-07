@@ -38,6 +38,8 @@ Camera, system file picker, export destinations and sharing targets still requir
 
 Documents are stored privately and removed on uninstall. Export important files first. Images are sampled to limit memory use. Rotation and grayscale apply to all pages. Imported images require a readable Android content URI. The camera uses the installed system camera application.
 
+The document viewer follows the supplied mobile reference: compact title/Tag/pages/selection/More header, naturally proportioned scan preview, Add Page strip, gray workspace, and Add/Edit/Share/To Word/Sign toolbar. Save, rename and delete are in More. New scans keep a processed JPEG preview next to the A4 PDF so the viewer preserves the photo proportions and selected grayscale/rotation. Older documents fall back to rendered PDF pages. Tags, page selection, AI, To Word and advanced editing still show availability messages.
+
 ## Planned next
 
 In-app CameraX capture, crop and perspective correction, individual page editing, OCR, PDF import/merge/split, and resilient background processing. EXIF orientation is handled during image decoding. This initial version is not a complete replacement for all Scanify web tools. Physical-device testing and release signing are still required.
