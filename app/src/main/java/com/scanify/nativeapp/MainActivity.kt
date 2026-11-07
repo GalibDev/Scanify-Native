@@ -56,7 +56,13 @@ class MainActivity : ComponentActivity() {
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
   var category by rememberSaveable { mutableStateOf("All") }
   var oldestFirst by rememberSaveable { mutableStateOf(false) }
-  var cameraPath by rememberSaveable { mutableStateOf("") }
+  var cameraOpen by rememberSaveable { mutableStateOf(false) }
+  DisposableEffect(cameraOpen) {
+   val bars = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+   bars.isAppearanceLightStatusBars = !cameraOpen
+   bars.isAppearanceLightNavigationBars = !cameraOpen
+   onDispose { }
+  }
   var exportId by rememberSaveable { mutableStateOf("") }
   var selectedId by rememberSaveable { mutableStateOf("") }
   var name by rememberSaveable { mutableStateOf("Scan ${DateFormat.getDateInstance().format(Date())}") }
@@ -77,18 +83,12 @@ class MainActivity : ComponentActivity() {
   suspend fun refresh() { documents = withContext(Dispatchers.IO) { store.list() } }
   LaunchedEffect(Unit) { try { refresh() } catch (_: Exception) { notice("Could not read the document library.") } }
 
-  val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-   if (success && cameraPath.isNotEmpty()) {
-    val file = File(cameraPath)
-    val uri = FileProvider.getUriForFile(this, "$packageName.files", file).toString()
-    draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
-   } else if (cameraPath.isNotEmpty()) File(cameraPath).delete()
-   retakeIndex = -1
-  }
   val images = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
    if (uris.isNotEmpty()) {
     uris.forEach { try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { } }
-    draft = ArrayList(draft + uris.map(Uri::toString))
+    val imported = uris.map(Uri::toString)
+    draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) imported.first() else value } + imported.drop(1)) else ArrayList(draft + imported)
+    cameraOpen = false; retakeIndex = -1
    }
   }
   val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
@@ -103,14 +103,7 @@ class MainActivity : ComponentActivity() {
     finally { busy = false }
    }
   }
-  fun capture() {
-   try {
-    val dir = File(cacheDir, "camera").apply { mkdirs() }
-    val file = File.createTempFile("scan-", ".jpg", dir)
-    cameraPath = file.absolutePath
-    camera.launch(FileProvider.getUriForFile(this, "$packageName.files", file))
-   } catch (_: Exception) { notice("No camera app is available. You can import an image instead.") }
-  }
+  fun capture() { cameraOpen = true }
   fun share(doc: ScanDocument) {
    try {
     val uri = FileProvider.getUriForFile(this, "$packageName.files", store.file(doc))
@@ -141,14 +134,22 @@ class MainActivity : ComponentActivity() {
    export.launch(doc.name.replace('/', '_').replace('\\', '_') + ".pdf")
   }
   Scaffold(
-   containerColor = if (selected != null) Color.White else Background,
+   containerColor = if (cameraOpen) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
-    if (draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
+    if (!cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    if (draft.isNotEmpty()) ScanReviewScreen(
+    if (cameraOpen) NativeCameraScreen(
+     owner = this@MainActivity, pageCount = draft.size, retaking = retakeIndex >= 0, grayscale = grayscale,
+     onFilter = { grayscale = it }, onCaptured = { uri, finish ->
+      draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
+      retakeIndex = -1
+      if (finish) cameraOpen = false
+     },
+     onClose = { cameraOpen = false; retakeIndex = -1 }, onImport = { images.launch(arrayOf("image/*")) }
+    ) else if (draft.isNotEmpty()) ScanReviewScreen(
      store, draft, name, rotation, grayscale, busy,
      onName = { name = it }, onBack = { discard = true },
      onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index }) },
