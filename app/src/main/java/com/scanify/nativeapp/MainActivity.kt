@@ -40,14 +40,14 @@ import java.text.DateFormat
 import java.util.Date
 
 private val Purple = Color(0xFF7C3AED)
-private val Background = Color(0xFFF7F5FC)
+private val Background = WebBackground
 
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
   enableEdgeToEdge()
   setContent {
-   MaterialTheme(colorScheme = lightColorScheme(primary = Purple, background = Background, surface = Color.White)) {
+   MaterialTheme(colorScheme = lightColorScheme(primary = Purple, background = Background, surface = Color.White, onSurface = WebText, onBackground = WebText)) {
     Scanify()
    }
   }
@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
   var rename by remember { mutableStateOf(false) }
   var renameText by remember { mutableStateOf("") }
   var deleting by remember { mutableStateOf(false) }
+  var unavailable by remember { mutableStateOf("") }
   val scope = rememberCoroutineScope()
   val snackbar = remember { SnackbarHostState() }
   fun notice(message: String) { scope.launch { snackbar.showSnackbar(message) } }
@@ -125,19 +126,16 @@ class MainActivity : ComponentActivity() {
    containerColor = Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
-    if (draft.isEmpty() && selected == null) NavigationBar(containerColor = Color.White) {
-     listOf("Home", "Documents", "Tools", "Settings").forEach { item ->
-      NavigationBarItem(selected = tab == item, onClick = { tab = item }, icon = { Text(when(item) { "Home" -> "⌂"; "Documents" -> "▤"; "Tools" -> "▦"; else -> "⚙" }) }, label = { Text(item) })
-     }
-    }
+    if (draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
-      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-       Column { Text("Scanify.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("PRIVATE · ON YOUR DEVICE", style = MaterialTheme.typography.labelSmall, color = Purple) }
-       if (selected != null || draft.isNotEmpty()) TextButton(enabled = !busy, onClick = { selectedId = ""; draft = arrayListOf() }) { Text("Close") }
+      if (selected == null && draft.isEmpty()) WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
+      else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+       Text("Scanify.", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+       TextButton(enabled = !busy, onClick = { selectedId = ""; draft = arrayListOf() }) { Text("Close") }
       }
      }
      when {
@@ -191,22 +189,28 @@ class MainActivity : ComponentActivity() {
        item { InfoCard("Next milestones", "In-app camera, crop and perspective correction, OCR, PDF import and advanced editing. These features are not included yet.") }
       }
       else -> {
+       if (tab == "Home") item { WebSearch(search, { search = it }) }
+       if (tab == "Documents") {
+        item { SectionTitle("My Documents", "Manage, organize, and access your files.") }
+        item { WebSearch(search, { search = it }, "Search documents and folders…") }
+       }
        if (tab != "Documents") {
-        item { SectionTitle(if (tab == "Tools") "Native tools" else "A little space for your big ideas", "Scan, organize and share your documents.") }
-        item { Card(colors = CardDefaults.cardColors(containerColor = Purple), shape = RoundedCornerShape(24.dp)) {
-         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-          Text("Paper to PDF.\nAll on your phone.", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-          Button(onClick = ::capture, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Purple), modifier = Modifier.fillMaxWidth()) { Text("Scan a document") }
-          OutlinedButton(onClick = { images.launch(arrayOf("image/*")) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White), modifier = Modifier.fillMaxWidth()) { Text("Import images") }
+        item { WebSection(if (tab == "Tools") "All Tools" else "Quick Tools", if (tab == "Tools") "Documents" else "View All Tools", { tab = if (tab == "Tools") "Documents" else "Tools" }) }
+        item { WebTools { tool ->
+         when (tool) {
+          "Smart Scan" -> capture()
+          "Import Images" -> images.launch(arrayOf("image/*"))
+          "PDF Tools", "All Tools" -> tab = "Tools"
+          else -> unavailable = tool
          }
         } }
-        if (tab == "Tools") item { InfoCard("Image to PDF", "Import several images, rotate or apply grayscale, then create one A4 PDF. Crop, OCR and PDF editing are planned next.") }
+        item { Spacer(Modifier.height(4.dp)); WebScanButton(::capture) }
+        if (tab == "Tools") item { InfoCard("Image to PDF", "Import images to create a PDF. Other native tools are being built.") }
        }
-       item { SectionTitle(if (tab == "Documents") "Documents" else "Recent documents", "${documents.size} document(s) · Local storage") }
-       item { OutlinedTextField(value = search, onValueChange = { search = it }, placeholder = { Text("Search your documents") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) }
        val visible = documents.filter { it.name.contains(search, ignoreCase = true) }
-       if (visible.isEmpty()) item { InfoCard(if (documents.isEmpty()) "Your first scan starts here" else "No matching documents", if (documents.isEmpty()) "Take a photo or import images to create your first native PDF." else "Try another search.") }
-       items(visible, key = { it.id }) { doc ->
+       item { WebSection(if (search.isNotBlank()) "Search Results" else if (tab == "Documents") "All Documents" else "Recent Documents", if (tab == "Documents") "Import" else "View All", { if (tab == "Documents") images.launch(arrayOf("image/*")) else tab = "Documents" }, visible.size) }
+       if (visible.isEmpty()) item { WebEmpty({ images.launch(arrayOf("image/*")) }, search.isNotBlank()) }
+       items(if (tab == "Home" && search.isBlank()) visible.take(3) else visible, key = { it.id }) { doc ->
         Card(Modifier.fillMaxWidth().clickable { selectedId = doc.id }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
          Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
           Surface(color = Color(0xFFEDE5FF), shape = RoundedCornerShape(12.dp)) { Text("PDF", Modifier.padding(12.dp), color = Purple, fontWeight = FontWeight.Bold) }
@@ -228,6 +232,12 @@ class MainActivity : ComponentActivity() {
   if (deleting && selected != null) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("Delete this document?") }, text = { Text("This removes the local PDF permanently. Exported copies are kept.") }, confirmButton = {
    TextButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { store.delete(selected) }; selectedId = ""; deleting = false; refresh() } catch (_: Exception) { notice("Could not delete document.") } } }) { Text("Delete") }
   }, dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } })
+  if (unavailable.isNotEmpty()) AlertDialog(
+   onDismissRequest = { unavailable = "" },
+   title = { Text(unavailable) },
+   text = { Text("This tool is not available in the native app yet. You can scan documents or import images to create a PDF.") },
+   confirmButton = { TextButton(onClick = { unavailable = "" }) { Text("Got it") } }
+  )
  }
 }
 

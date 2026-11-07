@@ -28,6 +28,7 @@ Camera, system file picker, export destinations and sharing targets still requir
 ## First milestone
 
 - Compose Home, Documents, Tools and Settings screens.
+- Website-inspired mobile design: Scanify header, search, eight Quick Tools cards, gradient scan action and five-position navigation with a floating scan button. Unimplemented tools show an availability dialog.
 - System camera capture and multiple image import.
 - Review, rotate all pages, optional grayscale and remove pages.
 - Create multipage A4 PDFs using Android PdfDocument.
