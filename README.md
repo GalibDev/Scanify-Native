@@ -29,9 +29,10 @@ Emulator checks passed camera permission denial/retry/grant, live preview, singl
 
 - Compose Home, Documents, Tools and Settings screens.
 - Website-inspired mobile design: Scanify header, search, eight Quick Tools cards, gradient scan action and five-position navigation with a floating scan button. Unimplemented tools show an availability dialog.
-- Website-style Documents category chips, quick actions, compact PDF rows and recent/oldest sorting. Review uses a full-screen gray stage, filter thumbnails and teal save action. PDF reader has a white header, page controls and bottom action toolbar. Settings matches the workspace/privacy card layout with native storage wording. Unsupported crop/OCR, PDF edit/sign/add-page, folders/favorites and dark appearance show availability dialogs.
+- Website-style Documents category chips, quick actions, compact PDF rows and recent/oldest sorting. Review uses a full-screen gray stage, filter thumbnails and teal save action. PDF reader has a white header, page controls and bottom action toolbar. Settings matches the workspace/privacy card layout with native storage wording. Unsupported OCR, PDF edit/sign/add-page, folders/favorites and dark appearance show availability dialogs.
 - In-app CameraX capture and multiple image import. Website-style black camera screen with live preview, teal shutter, Single/Batch controls, gallery, flashlight when available, camera switching when available, HD/Standard size, Original/Grayscale selection, grid lines and ID framing guide. Tap-to-focus and pinch-to-zoom are provided by CameraX.
 - Review, rotate all pages, optional grayscale and remove pages.
+- Manual four-corner crop and perspective correction for the selected review page, with Reset, corrected Preview and Apply. Drag handles protect against Android edge-back gestures. Cancel leaves the draft unchanged; Apply creates a separate cropped JPEG and replaces only that draft page. The original input file is not overwritten. Rotation and grayscale apply after cropping. Editing returns to the same review page.
 - Create multipage A4 PDFs using Android PdfDocument.
 - Private local document library with search, rename and delete confirmation.
 - Native PDF page preview, Save As export and Android sharing.
@@ -42,4 +43,6 @@ The document viewer follows the supplied mobile reference: compact title/Tag/pag
 
 ## Planned next
 
-Automatic document detection/capture, crop and perspective correction, individual page editing, OCR, PDF import/merge/split, and resilient background processing. EXIF orientation is handled during image decoding. This initial version is not a complete replacement for all Scanify web tools. Physical-device testing and release signing are still required.
+Automatic document detection/capture and auto-crop, individual page rotation/filters/reordering, OCR, PDF import/merge/split, and resilient background processing. Crop currently requires manually positioning all four corners. Output is limited to 2400 pixels on its longest edge to bound memory. EXIF orientation is handled during image decoding. This initial version is not a complete replacement for all Scanify web tools. Physical-device testing and release signing are still required.
+
+Crop validation passed on Android: synthetic trapezoid correction with four quadrant colors, rejection of crossed/degenerate/nonfinite corners, unchanged original file, and cropped JPEG dimensions. Emulator UI checks passed dragging all four handles, Preview, Apply, returning to review and saving the result as a PDF. Build and lint passed.

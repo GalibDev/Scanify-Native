@@ -46,6 +46,17 @@ class DocumentStore(private val context: Context) {
    if (matrix.isIdentity) decoded else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true).also { if (it !== decoded) decoded.recycle() }
   }
  }
+ fun crop(uri: Uri, points: List<CropPoint>): String {
+  val source = bitmap(uri)
+  val output = try { PerspectiveCrop.correct(source, points) } finally { source.recycle() }
+  val directory = File(context.cacheDir, "camera").apply { mkdirs() }
+  val target = File.createTempFile("crop-", ".jpg", directory)
+  try {
+   target.outputStream().use { check(output.compress(Bitmap.CompressFormat.JPEG, 95, it)) { "Could not save cropped page." } }
+   return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", target).toString()
+  } catch (error: Throwable) { target.delete(); throw error }
+  finally { output.recycle() }
+ }
  fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean): ScanDocument {
   require(uris.isNotEmpty())
   val doc = ScanDocument(UUID.randomUUID().toString(), name.trim().ifEmpty { "Scan" }, uris.size, System.currentTimeMillis())

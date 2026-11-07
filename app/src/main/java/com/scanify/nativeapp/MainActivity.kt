@@ -57,10 +57,12 @@ class MainActivity : ComponentActivity() {
   var category by rememberSaveable { mutableStateOf("All") }
   var oldestFirst by rememberSaveable { mutableStateOf(false) }
   var cameraOpen by rememberSaveable { mutableStateOf(false) }
-  DisposableEffect(cameraOpen) {
+  var cropIndex by rememberSaveable { mutableIntStateOf(-1) }
+  var reviewPage by rememberSaveable { mutableIntStateOf(0) }
+  DisposableEffect(cameraOpen, cropIndex) {
    val bars = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-   bars.isAppearanceLightStatusBars = !cameraOpen
-   bars.isAppearanceLightNavigationBars = !cameraOpen
+   bars.isAppearanceLightStatusBars = !cameraOpen && cropIndex < 0
+   bars.isAppearanceLightNavigationBars = !cameraOpen && cropIndex < 0
    onDispose { }
   }
   var exportId by rememberSaveable { mutableStateOf("") }
@@ -123,7 +125,7 @@ class MainActivity : ComponentActivity() {
          try {
           val doc = withContext(Dispatchers.IO) { store.create(draft.map(Uri::parse), name, rotation, grayscale) }
           draft.forEach { value -> val uri = Uri.parse(value); if (uri.authority == "$packageName.files") { val fileName = uri.lastPathSegment; if (fileName != null) File(cacheDir, "camera/$fileName").delete() } }
-          draft = arrayListOf(); rotation = 0; grayscale = false
+          draft = arrayListOf(); rotation = 0; grayscale = false; reviewPage = 0
           refresh(); selectedId = doc.id; notice("PDF created and saved in Documents.")
          } catch (_: Exception) { notice("Could not create PDF. Try fewer or smaller images.") }
          finally { busy = false }
@@ -134,14 +136,19 @@ class MainActivity : ComponentActivity() {
    export.launch(doc.name.replace('/', '_').replace('\\', '_') + ".pdf")
   }
   Scaffold(
-   containerColor = if (cameraOpen) Color.Black else if (selected != null) Color.White else Background,
+   containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
     if (!cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    if (cameraOpen) NativeCameraScreen(
+    if (cropIndex in draft.indices) CropScreen(store, draft[cropIndex],
+     onCancel = { cropIndex = -1 }, onApply = { result ->
+      draft = ArrayList(draft.mapIndexed { index, value -> if (index == cropIndex) result else value })
+      cropIndex = -1
+     }
+    ) else if (cameraOpen) NativeCameraScreen(
      owner = this@MainActivity, pageCount = draft.size, retaking = retakeIndex >= 0, grayscale = grayscale,
      onFilter = { grayscale = it }, onCaptured = { uri, finish ->
       draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
@@ -155,7 +162,7 @@ class MainActivity : ComponentActivity() {
      onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index }) },
      onRetake = { index -> retakeIndex = index; capture() },
      onRotate = { rotation = (rotation + 270) % 360 }, onFilter = { grayscale = it },
-     onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onUnavailable = { unavailable = it }
+     onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it }
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameText = selected.name; rename = true }, onSave = { savePdf(selected) },

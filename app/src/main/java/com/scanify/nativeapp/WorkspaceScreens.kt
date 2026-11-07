@@ -53,9 +53,8 @@ private fun ToolAction(icon: String, label: String, enabled: Boolean = true, col
 internal fun ScanReviewScreen(
  store: DocumentStore, pages: List<String>, name: String, rotation: Int, grayscale: Boolean, busy: Boolean,
  onName: (String) -> Unit, onBack: () -> Unit, onRemove: (Int) -> Unit, onRetake: (Int) -> Unit,
- onRotate: () -> Unit, onFilter: (Boolean) -> Unit, onImport: () -> Unit, onSave: () -> Unit, onUnavailable: (String) -> Unit
+ onRotate: () -> Unit, onFilter: (Boolean) -> Unit, onImport: () -> Unit, onSave: () -> Unit, onCrop: (Int) -> Unit, onUnavailable: (String) -> Unit, page: Int, onPage: (Int) -> Unit
 ) {
- var page by rememberSaveable { mutableIntStateOf(0) }
  val current = page.coerceIn(0, pages.lastIndex)
  val bitmap by produceState<Bitmap?>(null, pages[current]) {
   value = withContext(Dispatchers.IO) { runCatching { store.bitmap(Uri.parse(pages[current])) }.getOrNull() }
@@ -69,14 +68,14 @@ internal fun ScanReviewScreen(
   }
   Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp, vertical = 20.dp), contentAlignment = Alignment.Center) {
    bitmap?.let { Image(it.asImageBitmap(), "Scanned page ${current + 1}", Modifier.fillMaxSize().rotate(rotation.toFloat()), contentScale = ContentScale.Fit, colorFilter = filter) } ?: Text("Loading page…", color = WebMuted)
-   FilledIconButton(onClick = { onRemove(current); page = (current - 1).coerceAtLeast(0) }, enabled = !busy, modifier = Modifier.align(Alignment.TopStart).size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x88555555), contentColor = Color.White)) { WebIcon("trash", Modifier.size(19.dp), Color.White, "Delete current page") }
+   FilledIconButton(onClick = { onRemove(current); onPage((current - 1).coerceAtLeast(0)) }, enabled = !busy, modifier = Modifier.align(Alignment.TopStart).size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x88555555), contentColor = Color.White)) { WebIcon("trash", Modifier.size(19.dp), Color.White, "Delete current page") }
   }
   Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
    Surface(shape = RoundedCornerShape(5.dp), color = Color.White) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-     IconButton(onClick = { page = current - 1 }, enabled = current > 0 && !busy) { WebIcon("left", Modifier.size(20.dp), if (current > 0) WebText else WebMuted, "Previous scanned page") }
+     IconButton(onClick = { onPage(current - 1) }, enabled = current > 0 && !busy) { WebIcon("left", Modifier.size(20.dp), if (current > 0) WebText else WebMuted, "Previous scanned page") }
      Text("${current + 1} / ${pages.size}", fontSize = 14.sp)
-     IconButton(onClick = { page = current + 1 }, enabled = current < pages.lastIndex && !busy) { WebIcon("right", Modifier.size(20.dp), if (current < pages.lastIndex) WebText else WebMuted, "Next scanned page") }
+     IconButton(onClick = { onPage(current + 1) }, enabled = current < pages.lastIndex && !busy) { WebIcon("right", Modifier.size(20.dp), if (current < pages.lastIndex) WebText else WebMuted, "Next scanned page") }
     }
    }
    Spacer(Modifier.width(12.dp))
@@ -98,7 +97,7 @@ internal fun ScanReviewScreen(
    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
     ToolAction("camera", "Retake", !busy) { onRetake(current) }
     ToolAction("rotate", "Left", !busy, onClick = onRotate)
-    ToolAction("crop", "Crop", !busy) { onUnavailable("Crop") }
+    ToolAction("crop", "Crop", !busy) { onCrop(current) }
     ToolAction("text", "Extract Text", !busy) { onUnavailable("Extract Text") }
     Button(onClick = onSave, enabled = !busy && name.isNotBlank(), shape = RoundedCornerShape(4.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal), contentPadding = PaddingValues(10.dp), modifier = Modifier.size(52.dp, 46.dp)) { WebIcon("check", Modifier.size(27.dp), Color.White, "Save document") }
    }
