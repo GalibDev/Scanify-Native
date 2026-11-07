@@ -26,6 +26,7 @@ class StoreSmokeRunner : Instrumentation() {
     bitmap.recycle()
    }
    val store = DocumentStore(isolated)
+   testDocumentDetection()
    testPerspectiveCrop(store, root)
    check(store.list().isEmpty())
    val doc = store.create(listOf(Uri.fromFile(image), Uri.fromFile(image)), "Test scan", 90, true)
@@ -53,7 +54,7 @@ class StoreSmokeRunner : Instrumentation() {
    store.delete(doc)
    check(store.list().isEmpty() && !store.file(doc).exists())
    check(!previewFile.exists()) { "Deleting the document must remove its previews" }
-   results.putString("stream", "PASS: perspective correction, invalid corners, non-destructive crop, multipage PDF, grayscale, persistence, rename and delete\n")
+   results.putString("stream", "PASS: document detection, rotated/blank/non-paper frames, analyzer mapping/stride/close, temporal tracking, perspective crop, PDF and document library\n")
    finish(Activity.RESULT_OK, results)
   } catch (error: Throwable) {
    results.putString("stream", "FAIL: ${error.stackTraceToString()}")
@@ -95,5 +96,48 @@ class StoreSmokeRunner : Instrumentation() {
   check(runCatching { PerspectiveCrop.correct(skewed,listOf(corners[0],corners[2],corners[1],corners[3])) }.isFailure)
   targetContext.contentResolver.delete(croppedUri,null,null)
   cropped.recycle();corrected.recycle();skewed.recycle();flat.recycle()
+ }
+ private fun testDocumentDetection() {
+  check(DocumentDetector.available) { "OpenCV could not initialize" }
+  val paper=Bitmap.createBitmap(500,450,Bitmap.Config.ARGB_8888)
+  val expected=listOf(CropPoint(.1f,.1f),CropPoint(.9f,.2f),CropPoint(.8f,.9f),CropPoint(.15f,.8f))
+  val canvas=android.graphics.Canvas(paper)
+  canvas.drawColor(Color.rgb(35,40,45))
+  val polygon=android.graphics.Path().apply { moveTo(50f,45f);lineTo(450f,90f);lineTo(400f,405f);lineTo(75f,360f);close() }
+  canvas.drawPath(polygon,android.graphics.Paint().apply{color=Color.WHITE})
+  for(y in 140..280 step 35)canvas.drawRect(130f,y.toFloat(),340f,y+5f,android.graphics.Paint().apply{color=Color.DKGRAY})
+  val detected=requireNotNull(DocumentDetector.detect(paper)) { "Did not find the test paper" }
+  check(PerspectiveCrop.isValid(detected))
+  check(detected.indices.all { kotlin.math.hypot(detected[it].x-expected[it].x,detected[it].y-expected[it].y)<.035f }) { "Incorrect paper corners: $detected" }
+  val rotated=Bitmap.createBitmap(paper,0,0,500,450,android.graphics.Matrix().apply{postRotate(90f)},false)
+  check(DocumentDetector.detect(rotated)?.let(PerspectiveCrop::isValid)==true) { "Rotated paper was not detected" }
+  val blank=Bitmap.createBitmap(500,450,Bitmap.Config.ARGB_8888)
+  blank.eraseColor(Color.WHITE);check(DocumentDetector.detect(blank)==null) { "Blank frame must not detect a page" }
+  blank.eraseColor(Color.DKGRAY)
+  android.graphics.Canvas(blank).drawCircle(250f,225f,140f,android.graphics.Paint().apply{color=Color.WHITE})
+  check(DocumentDetector.detect(blank)==null) { "Circle must not detect as a page" }
+  val tracker=DetectionTracker()
+  check(tracker.update(detected)==null);check(tracker.update(detected)!=null)
+  tracker.update(null);tracker.update(null);check(tracker.update(null)==null)
+  check(tracker.update(detected)==null) { "Old outline must not reappear immediately" }
+  // A padded Y plane with a nonzero ByteBuffer position exercises actual analyzer indexing.
+  val rowStride=512;val bytes=ByteArray(7+rowStride*450)
+  for(y in 0 until 450)for(x in 0 until 500){val pixel=paper.getPixel(x,y);bytes[7+y*rowStride+x]=((Color.red(pixel)*77+Color.green(pixel)*150+Color.blue(pixel)*29) shr 8).toByte()}
+  val buffer=java.nio.ByteBuffer.wrap(bytes).apply{position(7)}
+  var closed=0
+  val sensorToBuffer=android.graphics.Matrix().apply{setScale(.5f,.5f)}
+  val desired=android.graphics.Matrix().apply{setRotate(90f);postTranslate(450f,0f)}
+  val sensorToView=android.graphics.Matrix().apply{setConcat(desired,sensorToBuffer)}
+  fun proxy(type:Class<*>,call:(String)->Any?):Any=java.lang.reflect.Proxy.newProxyInstance(type.classLoader,arrayOf(type)){_,method,_->call(method.name)}
+  val info=proxy(androidx.camera.core.ImageInfo::class.java){when(it){"getSensorToBufferTransformMatrix"->sensorToBuffer;"getRotationDegrees"->0;"getTimestamp"->0L;else->null}} as androidx.camera.core.ImageInfo
+  val plane=proxy(androidx.camera.core.ImageProxy.PlaneProxy::class.java){when(it){"getBuffer"->buffer;"getRowStride"->rowStride;"getPixelStride"->1;else->null}} as androidx.camera.core.ImageProxy.PlaneProxy
+  val frame=proxy(androidx.camera.core.ImageProxy::class.java){when(it){"getWidth"->500;"getHeight"->450;"getPlanes"->arrayOf(plane);"getImageInfo"->info;"close"->{closed++;null};else->null}} as androidx.camera.core.ImageProxy
+  var result:List<CropPoint>?=null
+  val analyzer=DocumentAnalyzer{result=it}
+  analyzer.updateTransform(sensorToView);analyzer.analyze(frame)
+  val mapped=requireNotNull(result) { "Analyzer did not return a boundary" }
+  check(mapped.indices.all { kotlin.math.hypot(mapped[it].x-(450-expected[it].y*450),mapped[it].y-expected[it].x*500)<18 }) { "Incorrect sensor/view mapping: $mapped" }
+  analyzer.analyze(frame);check(closed==2) { "Analyzer must close even a throttled frame" }
+  paper.recycle();rotated.recycle();blank.recycle()
  }
 }

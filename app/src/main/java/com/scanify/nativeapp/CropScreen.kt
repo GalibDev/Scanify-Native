@@ -45,6 +45,9 @@ private val CropAccent = Color(0xFF27E5D3)
 internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit, onApply: (String) -> Unit) {
  val scope = rememberCoroutineScope()
  var coords by rememberSaveable(uri) { mutableStateOf(arrayListOf(0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f)) }
+ var seeded by rememberSaveable(uri) { mutableStateOf(false) }
+ var manuallyAdjusted by rememberSaveable(uri) { mutableStateOf(false) }
+ var detectionHint by remember { mutableStateOf("Finding document edges…") }
  val points = coords.chunked(2).map { CropPoint(it[0], it[1]) }
  val currentPoints by rememberUpdatedState(points)
  var working by remember { mutableStateOf(false) }
@@ -54,6 +57,15 @@ internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit,
  var failedLoad by remember { mutableStateOf(false) }
  val source by produceState<Bitmap?>(null, uri) {
   value = withContext(Dispatchers.IO) { runCatching { store.bitmap(Uri.parse(uri)) }.getOrElse { failedLoad = true; null } }
+ }
+ LaunchedEffect(source) {
+  val bitmap=source
+  if(bitmap!=null && !seeded) {
+   val detected=withContext(Dispatchers.Default) { runCatching { DocumentDetector.detect(bitmap) }.getOrNull() }
+   if(!manuallyAdjusted && detected!=null) coords=ArrayList(detected.flatMap { listOf(it.x,it.y) })
+   seeded=true
+   detectionHint=if(detected!=null) "Edges suggested · drag corners to refine." else "No clear boundary found · position corners manually."
+  } else if(seeded) detectionHint="Drag the four corners around the paper."
  }
  var canvasSize by remember { mutableStateOf(IntSize.Zero) }
  var dragging by remember { mutableIntStateOf(-1) }
@@ -81,7 +93,7 @@ internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit,
   Row(Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 6.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
    IconButton(onClick = { if (showPreview) showPreview = false else onCancel() }, enabled = !working) { WebIcon("back", color = Color.White, description = "Cancel crop") }
    Column(Modifier.weight(1f)) { Text(if (showPreview) "Corrected preview" else "Adjust corners", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold); Text("Crop & perspective", color = Color.LightGray, fontSize = 11.sp) }
-   TextButton(enabled = !working, onClick = { coords = arrayListOf(0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f); showPreview = false; error = "" }) { Text("Reset", color = CropAccent) }
+   TextButton(enabled = !working, onClick = { manuallyAdjusted=true;coords = arrayListOf(0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f); showPreview = false; error = "" }) { Text("Reset", color = CropAccent) }
   }
   Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 36.dp, vertical = 24.dp), contentAlignment = Alignment.Center) {
    val bitmap = source
@@ -105,7 +117,7 @@ internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit,
         change.consume()
         val old = currentPoints[dragging]
         val next = currentPoints.toMutableList().apply { set(dragging, CropPoint((old.x+amount.x/imageWidth).coerceIn(0f,1f), (old.y+amount.y/imageHeight).coerceIn(0f,1f))) }
-        if (PerspectiveCrop.isValid(next)) { coords = ArrayList(next.flatMap { listOf(it.x,it.y) }); error = "" }
+        if (PerspectiveCrop.isValid(next)) { manuallyAdjusted=true;coords = ArrayList(next.flatMap { listOf(it.x,it.y) }); error = "" }
        }
       }
      )
@@ -131,9 +143,10 @@ internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit,
    if (working) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=0.5f)), contentAlignment=Alignment.Center) { CircularProgressIndicator(color=CropAccent) }
   }
   Column(Modifier.fillMaxWidth().background(Color.Black).padding(horizontal=18.dp,vertical=14.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
-   Text(if(error.isNotEmpty()) error else if(showPreview) "Check the result. Apply replaces only this page." else "Drag the four corners around the paper.\nRotation and filters apply after cropping.", color=if(error.isNotEmpty()) Color(0xFFFF9D93) else Color.LightGray, fontSize=12.sp,lineHeight=18.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
+   Text(if(error.isNotEmpty()) error else if(showPreview) "Check the result. Apply replaces only this page." else "$detectionHint\nRotation and filters apply after cropping.", color=if(error.isNotEmpty()) Color(0xFFFF9D93) else Color.LightGray, fontSize=12.sp,lineHeight=18.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
    Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
     OutlinedButton(enabled=source!=null && !working, modifier=Modifier.weight(1f), onClick={
+     manuallyAdjusted=true
      if(showPreview) showPreview=false else scope.launch {
       working=true;error=""
       try { preview=withContext(Dispatchers.Default) { PerspectiveCrop.correct(requireNotNull(source),points) };showPreview=true }
@@ -143,6 +156,7 @@ internal fun CropScreen(store: DocumentStore, uri: String, onCancel: () -> Unit,
     }) { Text(if(showPreview) "Adjust" else "Preview",color=Color.White) }
     Button(enabled=source!=null && !working && PerspectiveCrop.isValid(points),modifier=Modifier.weight(1f),colors=ButtonDefaults.buttonColors(containerColor=CropAccent,contentColor=Color.Black),onClick={
      scope.launch {
+      manuallyAdjusted=true
       working=true;error=""
       try { val result=withContext(Dispatchers.IO) { store.crop(Uri.parse(uri),points) };onApply(result) }
       catch(e:Exception) { error=e.message?:"Could not apply crop." }

@@ -51,7 +51,7 @@ private val CameraAccent = Color(0xFF27E5D3)
 @Composable
 internal fun NativeCameraScreen(
  owner: LifecycleOwner, pageCount: Int, retaking: Boolean, grayscale: Boolean,
- onFilter: (Boolean) -> Unit, onCaptured: (String, Boolean) -> Unit,
+ onFilter: (Boolean) -> Unit, onCaptured: (String, Boolean, Boolean) -> Unit,
  onClose: () -> Unit, onImport: () -> Unit
 ) {
  val context = LocalContext.current
@@ -63,6 +63,11 @@ internal fun NativeCameraScreen(
  var hd by rememberSaveable { mutableStateOf(true) }
  var batch by rememberSaveable { mutableStateOf(false) }
  var idGuide by rememberSaveable { mutableStateOf(false) }
+ var detectEnabled by rememberSaveable { mutableStateOf(true) }
+ var detectionSupported by remember { mutableStateOf(true) }
+ var outline by remember { mutableStateOf<List<CropPoint>?>(null) }
+ var tracker by remember { mutableStateOf(DetectionTracker()) }
+ val analysisExecutor = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
  var grid by rememberSaveable { mutableStateOf(false) }
  var panel by remember { mutableStateOf("") }
  var message by remember { mutableStateOf("") }
@@ -75,21 +80,32 @@ internal fun NativeCameraScreen(
  var retry by remember { mutableIntStateOf(0) }
  val active = remember { AtomicBoolean(true) }
  val latestCapture by rememberUpdatedState(onCaptured)
- val controller = remember { LifecycleCameraController(context).apply { setEnabledUseCases(CameraController.IMAGE_CAPTURE) } }
+ val controller = remember { LifecycleCameraController(context).apply { setEnabledUseCases(CameraController.IMAGE_CAPTURE or CameraController.IMAGE_ANALYSIS) } }
  val preview = remember { PreviewView(context).apply { implementationMode = PreviewView.ImplementationMode.COMPATIBLE; scaleType = PreviewView.ScaleType.FILL_CENTER; this.controller = controller } }
+ val analyzer = remember { DocumentAnalyzer { result ->
+  executor.execute {
+   if (active.get() && ready && detectEnabled && detectionSupported && preview.width > 0 && preview.height > 0) {
+    val normalized = result?.map { CropPoint(it.x/preview.width,it.y/preview.height) }?.takeIf { points -> points.all { it.x in 0f..1f && it.y in 0f..1f } }
+    outline = tracker.update(normalized)
+   } else { outline = null; tracker = DetectionTracker() }
+  }
+ } }
+ SideEffect { analyzer.enabled = detectEnabled }
  LaunchedEffect(Unit) { if (!granted && !requested) permission.launch(Manifest.permission.CAMERA) }
  DisposableEffect(owner) {
   val observer = LifecycleEventObserver { _, event ->
    if (event == Lifecycle.Event.ON_RESUME) granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
   }
   owner.lifecycle.addObserver(observer)
-  onDispose { active.set(false); owner.lifecycle.removeObserver(observer) }
+  onDispose { active.set(false); controller.clearImageAnalysisAnalyzer(); analysisExecutor.shutdown(); owner.lifecycle.removeObserver(observer) }
  }
  DisposableEffect(granted, front, hd, retry) {
   var disposed = false
+  outline = null; tracker = DetectionTracker()
   ready = false; error = ""; torch = false; flashAvailable = false; switchAvailable = false
   val streamObserver = Observer<PreviewView.StreamState> { state ->
    ready = state == PreviewView.StreamState.STREAMING
+   if(!ready){outline=null;tracker=DetectionTracker()}
    if (ready) flashAvailable = controller.cameraInfo?.hasFlashUnit() == true
   }
   if (granted) {
@@ -105,7 +121,17 @@ internal fun NativeCameraScreen(
       controller.cameraSelector = selector
       controller.imageCaptureMode = if (hd) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
       controller.imageCaptureResolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(if (hd) ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY else ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build()
-      controller.bindToLifecycle(owner)
+      try {
+       controller.setEnabledUseCases(CameraController.IMAGE_CAPTURE or CameraController.IMAGE_ANALYSIS)
+       controller.setImageAnalysisAnalyzer(analysisExecutor,analyzer)
+       controller.bindToLifecycle(owner)
+       detectionSupported = true
+      } catch (_: Exception) {
+       controller.clearImageAnalysisAnalyzer()
+       controller.setEnabledUseCases(CameraController.IMAGE_CAPTURE)
+       controller.bindToLifecycle(owner)
+       detectionSupported = false
+      }
      }
     } catch (_: Exception) { error = "Could not start the camera. Retry or import an image." }
    }, executor)
@@ -130,9 +156,15 @@ internal fun NativeCameraScreen(
    controller.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), executor, object : ImageCapture.OnImageSavedCallback {
     override fun onImageSaved(result: ImageCapture.OutputFileResults) {
      if (!active.get()) { file.delete(); return }
-     capturing = false
      val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file).toString()
-     latestCapture(uri, finish)
+     val shouldDetect = detectEnabled && detectionSupported
+     try { analysisExecutor.execute {
+      val detected = if (shouldDetect) runCatching {
+       val bitmap = DocumentStore(context).bitmap(Uri.parse(uri))
+       try { DocumentDetector.detect(bitmap) != null } finally { bitmap.recycle() }
+      }.getOrDefault(false) else false
+      executor.execute { if (active.get()) { capturing = false; latestCapture(uri, finish, detected) } else file.delete() }
+     } } catch (_: Exception) { file.delete(); capturing = false; error = "Could not process the photo. Please try again." }
     }
     override fun onError(exception: ImageCaptureException) {
      file.delete()
@@ -161,7 +193,13 @@ internal fun NativeCameraScreen(
     if (grid) Canvas(Modifier.fillMaxSize()) {
      for (i in 1..2) { drawLine(Color.White.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(size.width*i/3, 0f), androidx.compose.ui.geometry.Offset(size.width*i/3, size.height), strokeWidth = 1f); drawLine(Color.White.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(0f, size.height*i/3), androidx.compose.ui.geometry.Offset(size.width, size.height*i/3), strokeWidth = 1f) }
     }
-    Box((if (idGuide) Modifier.align(Alignment.Center).fillMaxWidth(0.78f).aspectRatio(1.59f) else Modifier.fillMaxSize()).border(1.dp, CameraAccent.copy(alpha = 0.7f)))
+    val detected = outline
+    if (detected != null && detectEnabled) Canvas(Modifier.fillMaxSize().semantics { contentDescription = "Detected document boundary" }) {
+     val path = androidx.compose.ui.graphics.Path().apply { moveTo(detected[0].x*size.width,detected[0].y*size.height); detected.drop(1).forEach { lineTo(it.x*size.width,it.y*size.height) };close() }
+     drawPath(path,CameraAccent.copy(alpha=0.15f));drawPath(path,CameraAccent,style=androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+     detected.forEach { drawCircle(CameraAccent,4.dp.toPx(),androidx.compose.ui.geometry.Offset(it.x*size.width,it.y*size.height)) }
+    }
+    if (detected == null) Box((if (idGuide) Modifier.align(Alignment.Center).fillMaxWidth(0.78f).aspectRatio(1.59f) else Modifier.fillMaxSize()).border(1.dp, CameraAccent.copy(alpha = 0.7f)))
    }
    if (!granted) Column(Modifier.align(Alignment.Center).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
     WebIcon("camera", Modifier.size(42.dp), CameraAccent)
@@ -174,7 +212,7 @@ internal fun NativeCameraScreen(
    } else if (!ready) CircularProgressIndicator(Modifier.align(Alignment.Center), color = CameraAccent)
    if (capturing) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = CameraAccent) }
    Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    if (ready) Text(if (capturing) "Saving photo…" else if (idGuide) "ID framing guide · manual capture" else "Position your document · tap to focus", color = Color.White, fontSize = 11.sp)
+    if (ready) Text(if (capturing) "Saving photo…" else if (outline != null && detectEnabled) "Document detected · tap shutter" else if (idGuide) "ID framing guide · manual capture" else if (detectEnabled && detectionSupported) "Looking for document edges · tap to capture" else "Position your document · tap to focus", color = Color.White, fontSize = 11.sp)
     Row(Modifier.background(Color(0xDD181818), CircleShape).padding(3.dp)) {
      listOf(false to "Single", true to "Batch").forEach { (value, title) ->
       Text(title, Modifier.clip(CircleShape).background(if (batch == value) Color(0xFF555555) else Color.Transparent).clickable(enabled = !capturing && !retaking) { batch = value }.padding(horizontal = 18.dp, vertical = 10.dp), color = Color.White, fontSize = 13.sp)
@@ -195,8 +233,9 @@ internal fun NativeCameraScreen(
        Text("Filters apply in review and PDF. Live preview remains in color.", color = Color.LightGray, fontSize = 11.sp)
       }
       else -> {
+       Row(verticalAlignment = Alignment.CenterVertically) { Text("Detect document edges", Modifier.weight(1f), color = Color.White); Switch(checked = detectEnabled && detectionSupported, enabled = detectionSupported, onCheckedChange = { detectEnabled = it; outline = null; tracker = DetectionTracker() }, colors = SwitchDefaults.colors(checkedTrackColor = CameraAccent)) }
        Row(verticalAlignment = Alignment.CenterVertically) { Text("Grid lines", Modifier.weight(1f), color = Color.White); Switch(checked = grid, onCheckedChange = { grid = it }, colors = SwitchDefaults.colors(checkedTrackColor = CameraAccent)) }
-       Text("Manual capture · tap to focus · pinch to zoom. Automatic detection and auto-crop are not available yet.", color = Color.LightGray, fontSize = 12.sp, lineHeight = 18.sp)
+       Text("Tap to capture · focus · pinch to zoom. Detected corners are suggestions; confirm them in Crop. Automatic shutter is not enabled.", color = Color.LightGray, fontSize = 12.sp, lineHeight = 18.sp)
       }
      }
      TextButton(onClick = { panel = "" }, modifier = Modifier.align(Alignment.End)) { Text("Done", color = CameraAccent) }

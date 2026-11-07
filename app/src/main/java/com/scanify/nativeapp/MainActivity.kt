@@ -150,10 +150,11 @@ class MainActivity : ComponentActivity() {
      }
     ) else if (cameraOpen) NativeCameraScreen(
      owner = this@MainActivity, pageCount = draft.size, retaking = retakeIndex >= 0, grayscale = grayscale,
-     onFilter = { grayscale = it }, onCaptured = { uri, finish ->
+     onFilter = { grayscale = it }, onCaptured = { uri, finish, detected ->
+      val capturedIndex = if (retakeIndex in draft.indices) retakeIndex else draft.size
       draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
       retakeIndex = -1
-      if (finish) cameraOpen = false
+      if (finish) { cameraOpen = false; reviewPage = capturedIndex; if(detected) cropIndex = capturedIndex }
      },
      onClose = { cameraOpen = false; retakeIndex = -1 }, onImport = { images.launch(arrayOf("image/*")) }
     ) else if (draft.isNotEmpty()) ScanReviewScreen(
