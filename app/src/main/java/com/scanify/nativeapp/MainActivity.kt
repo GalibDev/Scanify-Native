@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
    onDispose { }
   }
   var exportId by rememberSaveable { mutableStateOf("") }
+  var shareId by rememberSaveable { mutableStateOf("") }
+  var shareStatus by rememberSaveable { mutableStateOf("") }
   var selectedId by rememberSaveable { mutableStateOf("") }
   var name by rememberSaveable { mutableStateOf("Scan ${DateFormat.getDateInstance().format(Date())}") }
   var rotation by rememberSaveable { mutableIntStateOf(0) }
@@ -103,21 +105,25 @@ class MainActivity : ComponentActivity() {
     try {
      withContext(Dispatchers.IO) { contentResolver.openOutputStream(uri)?.use { output -> store.file(doc).inputStream().use { it.copyTo(output) } } ?: error("Cannot open destination") }
      notice("PDF saved to your chosen folder.")
-    } catch (_: Exception) { notice("Could not save this PDF. Please try again.") }
+     if(shareId==doc.id)shareStatus="PDF saved to your chosen folder."
+    } catch (_: Exception) { notice("Could not save this PDF. Please try again.");if(shareId==doc.id)shareStatus="Could not save this PDF. Please try again." }
     finally { busy = false }
    }
   }
   fun capture() { cameraOpen = true }
-  fun share(doc: ScanDocument) {
-   try {
+  fun share(doc: ScanDocument) { shareStatus="";shareId=doc.id }
+  fun sendPdf(doc: ScanDocument):String? {
+   return try {
     val uri = FileProvider.getUriForFile(this, "$packageName.files", store.file(doc))
     startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
      type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); putExtra(Intent.EXTRA_SUBJECT, doc.name)
      clipData = ClipData.newRawUri(doc.name, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }, "Share ${doc.name}"))
-   } catch (_: Exception) { notice("No app is available to share this PDF.") }
+    null
+   } catch (_: Exception) { "No app is available to share this PDF." }
   }
   val selected = documents.find { it.id == selectedId }
+  val shareDoc = documents.find { it.id == shareId }
   val actionDoc = documents.find { it.id == actionId } ?: selected
   BackHandler(enabled = !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
    when { draft.isNotEmpty() -> discard = true; selected != null -> selectedId = ""; else -> tab = "Home" }
@@ -212,6 +218,9 @@ class MainActivity : ComponentActivity() {
     if (busy) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.65f)).clickable { }, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
    }
   }
+  if(shareDoc!=null) DocumentSharePanel(shareDoc,store.file(shareDoc),busy,shareStatus,
+   onClose={shareId="";shareStatus=""},onRename={renameDocument(shareDoc)},
+   onSave={shareStatus="";savePdf(shareDoc)},onSend={shareStatus="";sendPdf(shareDoc)})
   if (rename && actionDoc != null) AlertDialog(onDismissRequest = { if(!busy){rename = false; actionId = ""} }, title = { Text("Rename document") }, text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, enabled = !busy) }, confirmButton = {
    TextButton(enabled = !busy && renameText.isNotBlank(), onClick = { scope.launch { busy=true;try { withContext(Dispatchers.IO) { store.rename(actionDoc, renameText) }; refresh(); rename = false; actionId = "" } catch (_: Exception) { notice("Could not rename document.") } finally { busy=false } } }) { Text("Save") }
   }, dismissButton = { TextButton(enabled = !busy, onClick = { rename = false; actionId = "" }) { Text("Cancel") } })

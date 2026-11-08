@@ -42,6 +42,9 @@ Tools UI validation: overview was compared with the bundled web application's mo
 - Create multipage A4 PDFs using Android PdfDocument.
 - Private local document library with search, rename and delete confirmation.
 - Native PDF page preview, Save As export and Android sharing.
+- Website-style Share bottom sheet from the reader and library: document preview, editable title, PDF size, sharing shortcuts and Save PDF. WhatsApp/Gmail/More open Android's chooser; Send to PC opens Save PDF for manual transfer. Copy Link requires cloud storage and is disabled. Word/image/long-image/photo exports are marked Soon.
+
+Share panel emulator validation passed preview loading, Android PDF chooser launch, Save PDF system picker, rename dialog/cancel, scrolling through disabled options and closing back to the reader. Build and lint passed. No message was sent during validation.
 
 Documents are stored privately and removed on uninstall. Export important files first. Images are sampled to limit memory use. Rotation and grayscale apply to all pages. Imported images require a readable Android content URI. Camera permission is requested only when opening the native camera. No microphone permission is required. Filters apply during review/PDF processing; live preview remains in color. ID mode adds a framing guide, without auto-crop or automatic ID processing. HD requests the largest supported capture size; actual output depends on hardware. CameraX releases the camera when the camera screen closes or its lifecycle stops.
 
