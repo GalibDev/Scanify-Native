@@ -185,37 +185,8 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
 @Composable
 internal fun LibraryCategories(selected: String, onSelect: (String) -> Unit) {
  LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-  items(listOf("All" to "grid", "PDF" to "file", "Images" to "images", "Folders" to "folder", "Favorites" to "shield")) { (title, icon) ->
+  items(listOf("All" to "grid", "PDF" to "file", "Images" to "images", "Folders" to "folder", "Favorites" to "star")) { (title, icon) ->
    FilterChip(selected = selected == title, onClick = { onSelect(title) }, label = { Text(title, fontSize = 12.sp) }, leadingIcon = { WebIcon(icon, Modifier.size(14.dp), if (selected == title) Color.White else WebPurple) }, shape = CircleShape, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = WebPurple, selectedLabelColor = Color.White, containerColor = Color.White), border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selected == title, borderColor = WebLine))
-  }
- }
-}
-
-@Composable
-internal fun LibraryActions(onScan: () -> Unit, onImport: () -> Unit, onUnavailable: (String) -> Unit) {
- Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-  listOf(Triple("Scan Document", "scan", onScan), Triple("Import Images", "images", onImport), Triple("New Folder", "folder", { onUnavailable("Folders") })).forEach { (label, icon, action) ->
-   Surface(onClick = action, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = Color.White, border = BorderStroke(1.dp, WebLine)) {
-    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-     Box(Modifier.size(32.dp).background(Color(0xFFF0E8FF), RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) { WebIcon(icon, Modifier.size(21.dp)) }
-     Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-    }
-   }
-  }
- }
-}
-
-@Composable
-internal fun LibraryDocument(doc: ScanDocument, onOpen: () -> Unit) {
- Surface(onClick = onOpen, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(11.dp), color = Color.White, border = BorderStroke(1.dp, WebLine)) {
-  Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-   Box(Modifier.size(49.dp, 43.dp).background(Color(0xFFF7F4FF), RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) { WebIcon("file", Modifier.size(25.dp)) }
-   Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Text(doc.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    Text("${doc.pages} page(s) · ${DateFormat.getDateInstance().format(Date(doc.created))}", fontSize = 10.sp, color = WebMuted)
-   }
-   Surface(color = Color(0xFFCC464D), shape = RoundedCornerShape(5.dp)) { Text("PDF", Modifier.padding(horizontal = 5.dp, vertical = 3.dp), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-   WebIcon("right", Modifier.size(17.dp), WebMuted)
   }
  }
 }

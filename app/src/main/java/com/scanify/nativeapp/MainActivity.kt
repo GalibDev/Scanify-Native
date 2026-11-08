@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -53,12 +51,12 @@ class MainActivity : ComponentActivity() {
   val store = remember { DocumentStore(this) }
   var documents by remember { mutableStateOf<List<ScanDocument>>(emptyList()) }
   var tab by rememberSaveable { mutableStateOf("Home") }
+  val documentsState = rememberSaveableStateHolder()
+  LaunchedEffect(tab) { if(tab != "Documents") documentsState.removeState("library") }
   val toolsState = rememberSaveableStateHolder()
   LaunchedEffect(tab) { if(tab != "Tools") toolsState.removeState("catalog") }
   var draft by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
-  var category by rememberSaveable { mutableStateOf("All") }
-  var oldestFirst by rememberSaveable { mutableStateOf(false) }
   var cameraOpen by rememberSaveable { mutableStateOf(false) }
   var cropIndex by rememberSaveable { mutableIntStateOf(-1) }
   var reviewPage by rememberSaveable { mutableIntStateOf(0) }
@@ -76,6 +74,7 @@ class MainActivity : ComponentActivity() {
   var busy by remember { mutableStateOf(false) }
   var search by rememberSaveable { mutableStateOf("") }
   var rename by remember { mutableStateOf(false) }
+  var actionId by rememberSaveable { mutableStateOf("") }
   var renameText by remember { mutableStateOf("") }
   var deleting by remember { mutableStateOf(false) }
   var unavailable by remember { mutableStateOf("") }
@@ -119,6 +118,7 @@ class MainActivity : ComponentActivity() {
    } catch (_: Exception) { notice("No app is available to share this PDF.") }
   }
   val selected = documents.find { it.id == selectedId }
+  val actionDoc = documents.find { it.id == actionId } ?: selected
   BackHandler(enabled = !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
    when { draft.isNotEmpty() -> discard = true; selected != null -> selectedId = ""; else -> tab = "Home" }
   }
@@ -138,6 +138,8 @@ class MainActivity : ComponentActivity() {
    exportId = doc.id
    export.launch(doc.name.replace('/', '_').replace('\\', '_') + ".pdf")
   }
+  fun renameDocument(doc: ScanDocument) { actionId=doc.id;renameText=doc.name;rename=true }
+  fun deleteDocument(doc: ScanDocument) { actionId=doc.id;deleting=true }
   Scaffold(
    containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
@@ -169,9 +171,12 @@ class MainActivity : ComponentActivity() {
      onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it }
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
-     onRename = { renameText = selected.name; rename = true }, onSave = { savePdf(selected) },
-     onShare = { share(selected) }, onDelete = { deleting = true }, onUnavailable = { unavailable = it }
-    ) else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { images.launch(arrayOf("image/*")) }) } else
+     onRename = { renameDocument(selected) }, onSave = { savePdf(selected) },
+     onShare = { share(selected) }, onDelete = { deleteDocument(selected) }, onUnavailable = { unavailable = it }
+    ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
+     DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={images.launch(arrayOf("image/*"))},
+      onOpen={selectedId=it.id},onRename=::renameDocument,onSave=::savePdf,onShare=::share,onDelete=::deleteDocument,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
+    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { images.launch(arrayOf("image/*")) }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
       WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
@@ -182,16 +187,6 @@ class MainActivity : ComponentActivity() {
       }
       else -> {
        if (tab == "Home") item { WebSearch(search, { search = it }) }
-       if (tab == "Documents") {
-        item { SectionTitle("My Documents", "Manage, organize, and access your files.") }
-        item { WebSearch(search, { search = it }, "Search documents and folders…") }
-        item { LibraryCategories(category) { if (it == "All" || it == "PDF" || it == "Images") category = it else unavailable = it } }
-        item { LibraryActions(::capture, { images.launch(arrayOf("image/*")) }, { unavailable = it }) }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-         TextButton(onClick = { oldestFirst = !oldestFirst }) { Text(if (oldestFirst) "Sort by: Oldest first" else "Sort by: Recent", color = WebMuted) }
-         WebIcon("grid", Modifier.size(20.dp), WebMuted)
-        } }
-       }
        if (tab != "Documents") {
         item { WebSection("Quick Tools", "View All Tools", { tab = "Tools" }) }
         item { WebTools { tool ->
@@ -204,11 +199,11 @@ class MainActivity : ComponentActivity() {
         } }
         item { Spacer(Modifier.height(4.dp)); WebScanButton(::capture) }
        }
-       val visible = documents.filter { it.name.contains(search, ignoreCase = true) && !(tab == "Documents" && category == "Images") }.let { if (oldestFirst && tab == "Documents") it.reversed() else it }
-       item { WebSection(if (search.isNotBlank()) "Search Results" else if (tab == "Documents") "All Documents" else "Recent Documents", if (tab == "Documents") "Import" else "View All", { if (tab == "Documents") images.launch(arrayOf("image/*")) else tab = "Documents" }, visible.size) }
+       val visible = documents.filter { it.name.contains(search, ignoreCase = true) }
+       item { WebSection(if (search.isNotBlank()) "Search Results" else "Recent Documents", "View All", { tab = "Documents" }, visible.size) }
        if (visible.isEmpty()) item { WebEmpty({ images.launch(arrayOf("image/*")) }, search.isNotBlank()) }
        items(if (tab == "Home" && search.isBlank()) visible.take(3) else visible, key = { it.id }) { doc ->
-        LibraryDocument(doc) { selectedId = doc.id }
+        DocumentLibraryCard(doc,store.file(doc),onOpen={selectedId=doc.id},onRename={renameDocument(doc)},onSave={savePdf(doc)},onShare={share(doc)},onDelete={deleteDocument(doc)})
        }
 
       }
@@ -217,12 +212,12 @@ class MainActivity : ComponentActivity() {
     if (busy) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.65f)).clickable { }, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
    }
   }
-  if (rename && selected != null) AlertDialog(onDismissRequest = { rename = false }, title = { Text("Rename document") }, text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true) }, confirmButton = {
-   TextButton(enabled = renameText.isNotBlank(), onClick = { scope.launch { try { withContext(Dispatchers.IO) { store.rename(selected, renameText) }; refresh(); rename = false } catch (_: Exception) { notice("Could not rename document.") } } }) { Text("Save") }
-  }, dismissButton = { TextButton(onClick = { rename = false }) { Text("Cancel") } })
-  if (deleting && selected != null) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("Delete this document?") }, text = { Text("This removes the local PDF permanently. Exported copies are kept.") }, confirmButton = {
-   TextButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { store.delete(selected) }; selectedId = ""; deleting = false; refresh() } catch (_: Exception) { notice("Could not delete document.") } } }) { Text("Delete") }
-  }, dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } })
+  if (rename && actionDoc != null) AlertDialog(onDismissRequest = { if(!busy){rename = false; actionId = ""} }, title = { Text("Rename document") }, text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, enabled = !busy) }, confirmButton = {
+   TextButton(enabled = !busy && renameText.isNotBlank(), onClick = { scope.launch { busy=true;try { withContext(Dispatchers.IO) { store.rename(actionDoc, renameText) }; refresh(); rename = false; actionId = "" } catch (_: Exception) { notice("Could not rename document.") } finally { busy=false } } }) { Text("Save") }
+  }, dismissButton = { TextButton(enabled = !busy, onClick = { rename = false; actionId = "" }) { Text("Cancel") } })
+  if (deleting && actionDoc != null) AlertDialog(onDismissRequest = { if(!busy){deleting = false; actionId = ""} }, title = { Text("Delete this document?") }, text = { Text("This removes the local PDF permanently. Exported copies are kept.") }, confirmButton = {
+   TextButton(enabled = !busy, onClick = { scope.launch { busy=true;try { withContext(Dispatchers.IO) { store.delete(actionDoc) }; if(selectedId==actionDoc.id)selectedId=""; deleting=false; actionId=""; refresh() } catch (_: Exception) { notice("Could not delete document.") } finally { busy=false } } }) { Text("Delete") }
+  }, dismissButton = { TextButton(enabled = !busy, onClick = { deleting = false; actionId = "" }) { Text("Cancel") } })
   if (unavailable.isNotEmpty()) AlertDialog(
    onDismissRequest = { unavailable = "" },
    title = { Text(unavailable) },
@@ -235,17 +230,5 @@ class MainActivity : ComponentActivity() {
    confirmButton = { TextButton(onClick = { draft = arrayListOf(); rotation = 0; grayscale = false; discard = false }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
    dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } }
   )
- }
-}
-
-@Composable
-private fun SectionTitle(title: String, subtitle: String) {
- Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Color.Gray) }
-}
-
-@Composable
-private fun InfoCard(title: String, body: String) {
- Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(20.dp)) {
-  Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(body, color = Color.Gray) }
  }
 }

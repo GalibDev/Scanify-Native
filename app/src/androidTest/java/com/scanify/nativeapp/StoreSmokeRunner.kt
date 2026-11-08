@@ -37,6 +37,19 @@ class StoreSmokeRunner : Instrumentation() {
    val previewPixel = preview.getPixel(40, 60)
    check(kotlin.math.abs(Color.red(previewPixel) - Color.green(previewPixel)) <= 3) { "Preview must match the grayscale PDF" }
    preview.recycle()
+   val thumbnail=DocumentThumbnailLoader.load(store.file(doc),doc.id)
+   check(thumbnail.bytes>0 && thumbnail.image!=null)
+   check(maxOf(thumbnail.image!!.width,thumbnail.image!!.height)<=384)
+   val thumbnailPixel=thumbnail.image!!.getPixel(thumbnail.image!!.width/2,thumbnail.image!!.height/2)
+   check(kotlin.math.abs(Color.red(thumbnailPixel)-Color.green(thumbnailPixel))<=3 && Color.red(thumbnailPixel)<240) { "Image thumbnail is blank or lost its grayscale" }
+   val legacy=File(root,"legacy.pdf").apply{writeBytes(store.file(doc).readBytes())}
+   val pdfThumbnail=DocumentThumbnailLoader.load(legacy,"legacy")
+   check(pdfThumbnail.image!=null && pdfThumbnail.bytes==legacy.length()) { "Legacy PDF thumbnail failed" }
+   check(maxOf(pdfThumbnail.image!!.width,pdfThumbnail.image!!.height)<=384)
+   val pdfPixel=pdfThumbnail.image!!.getPixel(pdfThumbnail.image!!.width/2,pdfThumbnail.image!!.height/2)
+   check(Color.red(pdfPixel)<240) { "Rendered PDF thumbnail is blank" }
+   val broken=File(root,"broken.pdf").apply{writeText("Not a PDF")}
+   check(DocumentThumbnailLoader.load(broken,"broken").image==null) { "Broken PDF should fall back to the file icon" }
    check(DocumentStore(isolated).list().single().id == doc.id)
    PdfRenderer(ParcelFileDescriptor.open(store.file(doc), ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
     check(renderer.pageCount == 2)
@@ -54,7 +67,8 @@ class StoreSmokeRunner : Instrumentation() {
    store.delete(doc)
    check(store.list().isEmpty() && !store.file(doc).exists())
    check(!previewFile.exists()) { "Deleting the document must remove its previews" }
-   results.putString("stream", "PASS: document detection, rotated/blank/non-paper frames, analyzer mapping/stride/close, temporal tracking, perspective crop, PDF and document library\n")
+   check(DocumentThumbnailLoader.load(store.file(doc),doc.id).image==null) { "Deleted files must not reuse a stale thumbnail" }
+   results.putString("stream", "PASS: bounded image/PDF thumbnails, broken/deleted file fallback, detection, analyzer mapping, perspective crop, PDF and document library\n")
    finish(Activity.RESULT_OK, results)
   } catch (error: Throwable) {
    results.putString("stream", "FAIL: ${error.stackTraceToString()}")

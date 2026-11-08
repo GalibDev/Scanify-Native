@@ -36,6 +36,9 @@ private val scanGradient = Brush.linearGradient(listOf(Color(0xFFAA45F4), Color(
 
 // Native vector paths; no web runtime or bitmap UI screenshots.
 private val paths = mapOf(
+ "star" to "M12 2L15 8L22 9L17 14L18 22L12 18L6 22L7 14L2 9L9 8Z",
+ "list" to "M4 6H20 M4 12H20 M4 18H20",
+ "down" to "M5 9L12 16L19 9",
  "book" to "M12 5Q7 2 2 4V20Q7 18 12 21Q17 18 22 20V4Q17 2 12 5Z M12 5V21",
  "board" to "M3 3H21V16H3Z M12 16V22 M7 22L12 18L17 22",
  "columns" to "M3 3H21V21H3Z M12 3V21",
