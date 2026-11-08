@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +53,8 @@ class MainActivity : ComponentActivity() {
   val store = remember { DocumentStore(this) }
   var documents by remember { mutableStateOf<List<ScanDocument>>(emptyList()) }
   var tab by rememberSaveable { mutableStateOf("Home") }
+  val toolsState = rememberSaveableStateHolder()
+  LaunchedEffect(tab) { if(tab != "Tools") toolsState.removeState("catalog") }
   var draft by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
   var category by rememberSaveable { mutableStateOf("All") }
@@ -168,7 +171,7 @@ class MainActivity : ComponentActivity() {
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameText = selected.name; rename = true }, onSave = { savePdf(selected) },
      onShare = { share(selected) }, onDelete = { deleting = true }, onUnavailable = { unavailable = it }
-    ) else
+    ) else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { images.launch(arrayOf("image/*")) }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
       WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
@@ -190,7 +193,7 @@ class MainActivity : ComponentActivity() {
         } }
        }
        if (tab != "Documents") {
-        item { WebSection(if (tab == "Tools") "All Tools" else "Quick Tools", if (tab == "Tools") "Documents" else "View All Tools", { tab = if (tab == "Tools") "Documents" else "Tools" }) }
+        item { WebSection("Quick Tools", "View All Tools", { tab = "Tools" }) }
         item { WebTools { tool ->
          when (tool) {
           "Smart Scan" -> capture()
@@ -200,7 +203,6 @@ class MainActivity : ComponentActivity() {
          }
         } }
         item { Spacer(Modifier.height(4.dp)); WebScanButton(::capture) }
-        if (tab == "Tools") item { InfoCard("Image to PDF", "Import images to create a PDF. Other native tools are being built.") }
        }
        val visible = documents.filter { it.name.contains(search, ignoreCase = true) && !(tab == "Documents" && category == "Images") }.let { if (oldestFirst && tab == "Documents") it.reversed() else it }
        item { WebSection(if (search.isNotBlank()) "Search Results" else if (tab == "Documents") "All Documents" else "Recent Documents", if (tab == "Documents") "Import" else "View All", { if (tab == "Documents") images.launch(arrayOf("image/*")) else tab = "Documents" }, visible.size) }
