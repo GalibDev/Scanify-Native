@@ -112,6 +112,43 @@ class MainActivity : ComponentActivity() {
   }
   fun capture() { cameraOpen = true }
   fun share(doc: ScanDocument) { shareStatus="";shareId=doc.id }
+  fun exportImages(doc:ScanDocument,photos:Boolean) {
+   if(busy)return
+   busy=true;shareStatus="Preparing page images…"
+   scope.launch {
+    var rendered:List<File> = emptyList()
+    try {
+     rendered=withContext(Dispatchers.IO){DocumentImageExport.render(store.file(doc),cacheDir,doc.name)}
+     if(photos) {
+      val count=withContext(Dispatchers.IO){DocumentImageExport.savePhotos(this@MainActivity,rendered)}
+      shareStatus="$count page image(s) saved to Pictures/Scanify."
+     } else {
+      val uris=ArrayList(rendered.map{FileProvider.getUriForFile(this@MainActivity,"$packageName.files",it)})
+      val intent=Intent(if(uris.size==1)Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
+       type="image/jpeg";putExtra(Intent.EXTRA_SUBJECT,doc.name)
+       if(uris.size==1)putExtra(Intent.EXTRA_STREAM,uris.first()) else putParcelableArrayListExtra(Intent.EXTRA_STREAM,uris)
+       clipData=ClipData.newRawUri(doc.name,uris.first()).apply{uris.drop(1).forEach{addItem(ClipData.Item(it))}}
+       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      startActivity(Intent.createChooser(intent,"Share ${doc.name} as images"))
+      shareStatus="Choose an app to share ${uris.size} page image(s)."
+     }
+    } catch(_:Exception) { shareStatus="Could not export page images. Check storage and try again." }
+    finally {
+     if(photos)withContext(Dispatchers.IO){rendered.firstOrNull()?.parentFile?.deleteRecursively()}
+     busy=false
+    }
+   }
+  }
+  val photoPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+   if(granted)documents.find{it.id==shareId}?.let{exportImages(it,true)}
+   else shareStatus="Photo access was denied. You can still share images to another app."
+  }
+  fun savePhotos(doc:ScanDocument) {
+   if(android.os.Build.VERSION.SDK_INT<29 && androidx.core.content.ContextCompat.checkSelfPermission(this,android.Manifest.permission.WRITE_EXTERNAL_STORAGE)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+    photoPermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+   else exportImages(doc,true)
+  }
   fun sendPdf(doc: ScanDocument):String? {
    return try {
     val uri = FileProvider.getUriForFile(this, "$packageName.files", store.file(doc))
@@ -220,7 +257,8 @@ class MainActivity : ComponentActivity() {
   }
   if(shareDoc!=null) DocumentSharePanel(shareDoc,store.file(shareDoc),busy,shareStatus,
    onClose={shareId="";shareStatus=""},onRename={renameDocument(shareDoc)},
-   onSave={shareStatus="";savePdf(shareDoc)},onSend={shareStatus="";sendPdf(shareDoc)})
+   onSave={shareStatus="";savePdf(shareDoc)},onSend={shareStatus="";sendPdf(shareDoc)},
+   onImages={exportImages(shareDoc,false)},onPhotos={savePhotos(shareDoc)})
   if (rename && actionDoc != null) AlertDialog(onDismissRequest = { if(!busy){rename = false; actionId = ""} }, title = { Text("Rename document") }, text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, enabled = !busy) }, confirmButton = {
    TextButton(enabled = !busy && renameText.isNotBlank(), onClick = { scope.launch { busy=true;try { withContext(Dispatchers.IO) { store.rename(actionDoc, renameText) }; refresh(); rename = false; actionId = "" } catch (_: Exception) { notice("Could not rename document.") } finally { busy=false } } }) { Text("Save") }
   }, dismissButton = { TextButton(enabled = !busy, onClick = { rename = false; actionId = "" }) { Text("Cancel") } })

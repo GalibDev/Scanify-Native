@@ -42,7 +42,10 @@ Tools UI validation: overview was compared with the bundled web application's mo
 - Create multipage A4 PDFs using Android PdfDocument.
 - Private local document library with search, rename and delete confirmation.
 - Native PDF page preview, Save As export and Android sharing.
-- Website-style Share bottom sheet from the reader and library: document preview, editable title, PDF size, sharing shortcuts and Save PDF. WhatsApp/Gmail/More open Android's chooser; Send to PC opens Save PDF for manual transfer. Copy Link requires cloud storage and is disabled. Word/image/long-image/photo exports are marked Soon.
+- Website-style Share bottom sheet from the reader and library: document preview, editable title, PDF size, sharing shortcuts and Save PDF. WhatsApp/Gmail/More open Android's chooser; Send to PC opens Save PDF for manual transfer. Copy Link requires cloud storage and is disabled. Word and long-image exports are marked Soon.
+- Share as Images renders every PDF page as a JPEG and opens Android's single/multiple-image chooser with temporary read access. Save to Photos writes all pages to Pictures/Scanify. Android 10+ uses pending MediaStore entries without storage permission; Android 8/9 requests legacy write permission only when saving photos. Failed saves remove their created entries. Export processes one page at a time, with a maximum 2400-pixel edge; shared files remain in app cache for receiving apps to read.
+
+Image export validation passed two-page output, 2400-pixel bounds, grayscale content, white background and failed-export cleanup on-device. Emulator UI checks passed Sharing 2 images and saving two readable JPEGs to Pictures/Scanify. Android 8/9 permission flow still needs device validation.
 
 Share panel emulator validation passed preview loading, Android PDF chooser launch, Save PDF system picker, rename dialog/cancel, scrolling through disabled options and closing back to the reader. Build and lint passed. No message was sent during validation.
 

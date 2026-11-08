@@ -27,7 +27,7 @@ import java.util.Locale
 @Composable
 internal fun DocumentSharePanel(
  doc:ScanDocument,file:File,busy:Boolean,statusMessage:String,
- onClose:()->Unit,onRename:()->Unit,onSave:()->Unit,onSend:()->String?
+ onClose:()->Unit,onRename:()->Unit,onSave:()->Unit,onSend:()->String?,onImages:()->Unit,onPhotos:()->Unit
 ) {
  val state=rememberModalBottomSheetState(skipPartiallyExpanded=true,confirmValueChange={!busy})
  var linkInfo by rememberSaveable(doc.id){mutableStateOf(false)}
@@ -74,13 +74,16 @@ internal fun DocumentSharePanel(
       HorizontalDivider(color=Color(0xFFEEEEEE))
       ShareOption("Save PDF","download",available){save()}
       HorizontalDivider(color=Color(0xFFEEEEEE))
-      listOf("Share as Word" to "file","Share as Images" to "images","Share as Long Image" to "images","Save to Photos" to "download").forEachIndexed{index,(title,icon)->
-       ShareOption(title,icon,false,"Soon"){}
-       if(index<3)HorizontalDivider(color=Color(0xFFEEEEEE))
-      }
+      ShareOption("Share as Word","file",false,"Soon"){}
+      HorizontalDivider(color=Color(0xFFEEEEEE))
+      ShareOption("Share as Images","images",available,onClick=onImages)
+      HorizontalDivider(color=Color(0xFFEEEEEE))
+      ShareOption("Share as Long Image","images",false,"Soon"){}
+      HorizontalDivider(color=Color(0xFFEEEEEE))
+      ShareOption("Save to Photos","download",available,onClick=onPhotos)
      }
     }
-    if(busy)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp);Text("Saving PDF…",fontSize=13.sp,color=Color(0xFF777777))}
+    if(busy)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp);Text("Processing document…",fontSize=13.sp,color=Color(0xFF777777))}
     val status=when{statusMessage.isNotEmpty()->statusMessage;result==null->"Preparing PDF on your device…";result!!.bytes==0L->"This PDF is unavailable. Close sharing and reopen the document.";else->hint}
     if(status.isNotEmpty())Text(status,fontSize=12.sp,lineHeight=18.sp,color=Color(0xFF777777))
    }

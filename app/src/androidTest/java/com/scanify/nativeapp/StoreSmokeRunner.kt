@@ -31,6 +31,19 @@ class StoreSmokeRunner : Instrumentation() {
    check(store.list().isEmpty())
    val doc = store.create(listOf(Uri.fromFile(image), Uri.fromFile(image)), "Test scan", 90, true)
    check(doc.pages == 2 && store.file(doc).length() > 0)
+   val exported=DocumentImageExport.render(store.file(doc),root,"Test / export")
+   check(exported.size==2 && exported.map{it.name}.distinct().size==2)
+   exported.forEach { file ->
+    val bitmap=checkNotNull(android.graphics.BitmapFactory.decodeFile(file.absolutePath))
+    check(maxOf(bitmap.width,bitmap.height)==2400)
+    val pixel=bitmap.getPixel(bitmap.width/2,bitmap.height/2)
+    check(Color.red(pixel)<240 && kotlin.math.abs(Color.red(pixel)-Color.green(pixel))<4) { "Exported image lost PDF content" }
+    check(Color.red(bitmap.getPixel(2,2))>245) { "PDF background must be white" }
+    bitmap.recycle()
+   }
+   val failedBefore=File(root,"shared-images").listFiles()!!.size
+   check(runCatching{DocumentImageExport.render(image,root,"broken")}.isFailure)
+   check(File(root,"shared-images").listFiles()!!.size==failedBefore) { "Failed export left temporary files" }
    val previewFile = File(store.file(doc).parentFile, "${doc.id}-0.jpg")
    val preview = android.graphics.BitmapFactory.decodeFile(previewFile.absolutePath)
    check(preview != null && preview.width == 80 && preview.height == 120) { "Preview must preserve the rotated image proportions" }
