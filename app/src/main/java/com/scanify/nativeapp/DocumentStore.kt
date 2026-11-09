@@ -57,7 +57,25 @@ class DocumentStore(private val context: Context) {
   } catch (error: Throwable) { target.delete(); throw error }
   finally { output.recycle() }
  }
- fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean): ScanDocument {
+ fun pageSources(doc:ScanDocument):List<String> {
+  val previews=(0 until doc.pages).map{File(root,"${doc.id}-$it.jpg")}
+  val sources=if(previews.all{it.isFile && it.length()>0})previews else DocumentImageExport.render(file(doc),context.cacheDir,doc.name)
+  return sources.map{androidx.core.content.FileProvider.getUriForFile(context,"${context.packageName}.files",it).toString()}
+ }
+ // Publish only after every page and the PDF have been written. Existing data survives failures.
+ fun replace(doc:ScanDocument,uris:List<Uri>,name:String,rotation:Int,grayscale:Boolean):ScanDocument {
+  require(list().any{it.id==doc.id}) { "Document no longer exists" }
+  val staged=create(uris,name,rotation,grayscale,publish=false).copy(created=doc.created)
+  try {
+   val current=list()
+   check(current.any{it.id==doc.id})
+   write(current.map{if(it.id==doc.id)staged else it})
+  } catch(error:Exception) { removeFiles(staged);throw error }
+  removeFiles(doc)
+  return staged
+ }
+ private fun removeFiles(doc:ScanDocument) { file(doc).delete();(0 until doc.pages).forEach{File(root,"${doc.id}-$it.jpg").delete()} }
+ fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean, publish:Boolean=true): ScanDocument {
   require(uris.isNotEmpty())
   val doc = ScanDocument(UUID.randomUUID().toString(), name.trim().ifEmpty { "Scan" }, uris.size, System.currentTimeMillis())
   val target = file(doc)
@@ -83,7 +101,7 @@ class DocumentStore(private val context: Context) {
     }
     target.outputStream().use { pdf.writeTo(it) }
    } finally { pdf.close() }
-   write(list() + doc)
+   if(publish)write(list() + doc)
    return doc
   } catch (error: Exception) { target.delete(); uris.indices.forEach { File(root, "${doc.id}-$it.jpg").delete() }; throw error }
  }

@@ -70,6 +70,8 @@ class MainActivity : ComponentActivity() {
   var shareId by rememberSaveable { mutableStateOf("") }
   var shareStatus by rememberSaveable { mutableStateOf("") }
   var selectedId by rememberSaveable { mutableStateOf("") }
+  var editingId by rememberSaveable { mutableStateOf("") }
+  var addPage by remember { mutableStateOf(false) }
   var name by rememberSaveable { mutableStateOf("Scan ${DateFormat.getDateInstance().format(Date())}") }
   var rotation by rememberSaveable { mutableIntStateOf(0) }
   var grayscale by rememberSaveable { mutableStateOf(false) }
@@ -93,6 +95,7 @@ class MainActivity : ComponentActivity() {
    if (uris.isNotEmpty()) {
     uris.forEach { try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { } }
     val imported = uris.map(Uri::toString)
+    reviewPage=if(retakeIndex in draft.indices)retakeIndex else draft.size
     draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) imported.first() else value } + imported.drop(1)) else ArrayList(draft + imported)
     cameraOpen = false; retakeIndex = -1
    }
@@ -169,10 +172,12 @@ class MainActivity : ComponentActivity() {
         scope.launch {
          busy = true
          try {
-          val doc = withContext(Dispatchers.IO) { store.create(draft.map(Uri::parse), name, rotation, grayscale) }
+          val existing=documents.find{it.id==editingId}
+          check(editingId.isEmpty()||existing!=null) { "Original document is unavailable" }
+          val doc = withContext(Dispatchers.IO) { if(existing!=null)store.replace(existing,draft.map(Uri::parse),name,rotation,grayscale) else store.create(draft.map(Uri::parse), name, rotation, grayscale) }
           draft.forEach { value -> val uri = Uri.parse(value); if (uri.authority == "$packageName.files") { val fileName = uri.lastPathSegment; if (fileName != null) File(cacheDir, "camera/$fileName").delete() } }
-          draft = arrayListOf(); rotation = 0; grayscale = false; reviewPage = 0
-          refresh(); selectedId = doc.id; notice("PDF created and saved in Documents.")
+          draft = arrayListOf(); rotation = 0; grayscale = false; reviewPage = 0;editingId=""
+          refresh(); selectedId = doc.id; notice(if(existing!=null)"Document updated." else "PDF created and saved in Documents.")
          } catch (_: Exception) { notice("Could not create PDF. Try fewer or smaller images.") }
          finally { busy = false }
         }
@@ -183,6 +188,18 @@ class MainActivity : ComponentActivity() {
   }
   fun renameDocument(doc: ScanDocument) { actionId=doc.id;renameText=doc.name;rename=true }
   fun deleteDocument(doc: ScanDocument) { actionId=doc.id;deleting=true }
+  fun editDocument(doc:ScanDocument,source:String="") {
+   if(busy)return
+   busy=true;addPage=false
+   scope.launch {
+    try {
+     val pages=withContext(Dispatchers.IO){store.pageSources(doc)}
+     draft=ArrayList(pages);editingId=doc.id;name=doc.name;rotation=0;grayscale=false;reviewPage=0;retakeIndex=-1
+     if(source=="camera")capture() else if(source=="images")images.launch(arrayOf("image/*"))
+    } catch(_:Exception){notice("Could not open pages for editing. The saved document is unchanged.")}
+    finally{busy=false}
+   }
+  }
   Scaffold(
    containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
@@ -211,11 +228,12 @@ class MainActivity : ComponentActivity() {
      onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index }) },
      onRetake = { index -> retakeIndex = index; capture() },
      onRotate = { rotation = (rotation + 270) % 360 }, onFilter = { grayscale = it },
-     onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it }
+     onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
+     editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);draft=reordered;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameDocument(selected) }, onSave = { savePdf(selected) },
-     onShare = { share(selected) }, onDelete = { deleteDocument(selected) }, onUnavailable = { unavailable = it }
+     onShare = { share(selected) }, onDelete = { deleteDocument(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
     ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
      DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={images.launch(arrayOf("image/*"))},
       onOpen={selectedId=it.id},onRename=::renameDocument,onSave=::savePdf,onShare=::share,onDelete=::deleteDocument,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
@@ -255,6 +273,11 @@ class MainActivity : ComponentActivity() {
     if (busy) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.65f)).clickable { }, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
    }
   }
+  if(addPage && selected!=null)AlertDialog(onDismissRequest={addPage=false},title={Text("Add Page")},text={Column{
+   Text("Add a scan or import images. Review your pages before saving.")
+   TextButton(onClick={editDocument(selected,"camera")}){Text("Scan with Camera")}
+   TextButton(onClick={editDocument(selected,"images")}){Text("Import Images")}
+  }},confirmButton={TextButton(onClick={addPage=false}){Text("Cancel")}})
   if(shareDoc!=null) DocumentSharePanel(shareDoc,store.file(shareDoc),busy,shareStatus,
    onClose={shareId="";shareStatus=""},onRename={renameDocument(shareDoc)},
    onSave={shareStatus="";savePdf(shareDoc)},onSend={shareStatus="";sendPdf(shareDoc)},
@@ -274,7 +297,7 @@ class MainActivity : ComponentActivity() {
   if (discard) AlertDialog(
    onDismissRequest = { discard = false }, title = { Text("Discard this scan?") },
    text = { Text("Your unsaved pages will be removed. Saved documents are kept.") },
-   confirmButton = { TextButton(onClick = { draft = arrayListOf(); rotation = 0; grayscale = false; discard = false }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
+   confirmButton = { TextButton(onClick = { draft = arrayListOf(); rotation = 0; grayscale = false; discard = false;editingId="";reviewPage=0;retakeIndex=-1 }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
    dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } }
   )
  }

@@ -53,7 +53,8 @@ private fun ToolAction(icon: String, label: String, enabled: Boolean = true, col
 internal fun ScanReviewScreen(
  store: DocumentStore, pages: List<String>, name: String, rotation: Int, grayscale: Boolean, busy: Boolean,
  onName: (String) -> Unit, onBack: () -> Unit, onRemove: (Int) -> Unit, onRetake: (Int) -> Unit,
- onRotate: () -> Unit, onFilter: (Boolean) -> Unit, onImport: () -> Unit, onSave: () -> Unit, onCrop: (Int) -> Unit, onUnavailable: (String) -> Unit, page: Int, onPage: (Int) -> Unit
+ onRotate: () -> Unit, onFilter: (Boolean) -> Unit, onImport: () -> Unit, onSave: () -> Unit, onCrop: (Int) -> Unit, onUnavailable: (String) -> Unit, page: Int, onPage: (Int) -> Unit,
+ onMove:(Int,Int)->Unit,editing:Boolean=false
 ) {
  val current = page.coerceIn(0, pages.lastIndex)
  val bitmap by produceState<Bitmap?>(null, pages[current]) {
@@ -68,7 +69,7 @@ internal fun ScanReviewScreen(
   }
   Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp, vertical = 20.dp), contentAlignment = Alignment.Center) {
    bitmap?.let { Image(it.asImageBitmap(), "Scanned page ${current + 1}", Modifier.fillMaxSize().rotate(rotation.toFloat()), contentScale = ContentScale.Fit, colorFilter = filter) } ?: Text("Loading page…", color = WebMuted)
-   FilledIconButton(onClick = { onRemove(current); onPage((current - 1).coerceAtLeast(0)) }, enabled = !busy, modifier = Modifier.align(Alignment.TopStart).size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x88555555), contentColor = Color.White)) { WebIcon("trash", Modifier.size(19.dp), Color.White, "Delete current page") }
+   FilledIconButton(onClick = { onRemove(current); onPage((current - 1).coerceAtLeast(0)) }, enabled = !busy && (!editing || pages.size>1), modifier = Modifier.align(Alignment.TopStart).size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x88555555), contentColor = Color.White)) { WebIcon("trash", Modifier.size(19.dp), Color.White, "Delete current page") }
   }
   Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
    Surface(shape = RoundedCornerShape(5.dp), color = Color.White) {
@@ -82,6 +83,11 @@ internal fun ScanReviewScreen(
    TextButton(onClick = onImport, enabled = !busy, colors = ButtonDefaults.textButtonColors(contentColor = WebText)) { WebIcon("plus", Modifier.size(17.dp), WebText); Text(" Add") }
   }
   Column(Modifier.background(Color.White, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))) {
+   if(pages.size>1)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.Center) {
+    TextButton(onClick={onMove(current,current-1)},enabled=!busy&&current>0){Text("Move Earlier",color=if(current>0)ReaderTeal else WebMuted)}
+    TextButton(onClick={onMove(current,current+1)},enabled=!busy&&current<pages.lastIndex){Text("Move Later",color=if(current<pages.lastIndex)ReaderTeal else WebMuted)}
+   }
+   if(editing)Text("Changes apply when you save. Back lets you discard them.",Modifier.padding(horizontal=16.dp,vertical=4.dp),fontSize=11.sp,color=WebMuted)
    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
     listOf(false to "Original", true to "Grayscale").forEach { (gray, label) ->
      Column(Modifier.width(86.dp).clip(RoundedCornerShape(6.dp)).border(2.dp, if (grayscale == gray) Teal else WebLine, RoundedCornerShape(6.dp)).clickable(enabled = !busy) { onFilter(gray) }, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -106,7 +112,7 @@ internal fun ScanReviewScreen(
 }
 
 @Composable
-internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> Unit, onRename: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit, onUnavailable: (String) -> Unit) {
+internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> Unit, onRename: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit, onUnavailable: (String) -> Unit,onAdd:()->Unit,onEdit:()->Unit) {
  var page by rememberSaveable(doc.id) { mutableIntStateOf(0) }
  var more by remember { mutableStateOf(false) }
  var grid by rememberSaveable(doc.id) { mutableStateOf(false) }
@@ -128,7 +134,7 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
    Text(doc.name, Modifier.weight(1f).clickable(onClick = onRename).padding(end = 4.dp), fontSize = 16.sp, color = Color(0xFF292929), fontWeight = FontWeight.Normal, textDecoration = TextDecoration.Underline, maxLines = 1, overflow = TextOverflow.Ellipsis)
    Surface(onClick = { onUnavailable("Tags") }, shape = RoundedCornerShape(4.dp), border = BorderStroke(1.dp, Color(0xFFDDDDDD)), color = Color.White) { Text("Tag +", Modifier.padding(horizontal = 5.dp, vertical = 3.dp), fontSize = 11.sp, color = Color.Gray) }
    IconButton(onClick = { grid = !grid }, modifier = Modifier.size(34.dp)) { WebIcon("grid", Modifier.size(20.dp), if(grid) ReaderTeal else Color(0xFF292929), "Show pages") }
-   IconButton(onClick = { onUnavailable("Page selection") }, modifier = Modifier.size(34.dp)) { WebIcon("select", Modifier.size(21.dp), Color(0xFF292929), "Select pages") }
+   IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) { WebIcon("select", Modifier.size(21.dp), Color(0xFF292929), "Manage pages") }
    Box {
     IconButton(onClick = { more = true }, modifier = Modifier.size(34.dp)) { WebIcon("more", Modifier.size(23.dp), Color(0xFF292929), "More document actions") }
     DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
@@ -158,7 +164,7 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
      Text("${page + 1} / ${doc.pages}", fontSize = 13.sp)
      IconButton(onClick = { page++ }, enabled = page + 1 < doc.pages) { WebIcon("right", Modifier.size(19.dp), if (page + 1 < doc.pages) Color.DarkGray else WebMuted, "Next PDF page") }
     }
-    Row(Modifier.fillMaxWidth().height(62.dp).background(Color.White).clickable { onUnavailable("Add Page") }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+    Row(Modifier.fillMaxWidth().height(62.dp).background(Color.White).clickable(onClick=onAdd), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
      Box(Modifier.size(20.dp).background(Color(0xFF20B5A8), CircleShape), contentAlignment = Alignment.Center) { WebIcon("plus", Modifier.size(15.dp), Color.White) }
      Text("  Add Page", fontSize = 16.sp, color = Color(0xFF666666))
     }
@@ -169,8 +175,8 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
   }
   HorizontalDivider(color = Color(0xFFF0F0F0))
   Row(Modifier.fillMaxWidth().background(Color.White).height(74.dp).padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.Top) {
-   ToolAction("camera", "Add", color = Color(0xFF292929)) { onUnavailable("Add Page") }
-   ToolAction("edit", "Edit", color = Color(0xFF292929)) { onUnavailable("PDF editing") }
+   ToolAction("camera", "Add", color = Color(0xFF292929),onClick=onAdd)
+   ToolAction("edit", "Edit", color = Color(0xFF292929),onClick=onEdit)
    ToolAction("share", "Share", color = Color(0xFF292929), onClick = onShare)
    Column(Modifier.widthIn(min = 48.dp).clickable { onUnavailable("To Word") }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text("Word", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF292929), modifier = Modifier.height(24.dp))

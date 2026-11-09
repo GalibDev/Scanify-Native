@@ -76,12 +76,29 @@ class StoreSmokeRunner : Instrumentation() {
     }
    }
    store.rename(doc, "Renamed")
+   val blue=File(root,"blue.png")
+   Bitmap.createBitmap(80,120,Bitmap.Config.ARGB_8888).also{bitmap->bitmap.eraseColor(Color.BLUE);blue.outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
+   val editable=store.create(listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Editable",0,false)
+   val before=store.file(editable).readBytes()
+   check(runCatching{store.replace(editable,listOf(Uri.fromFile(File(root,"missing.png"))),"Failed",0,false)}.isFailure)
+   check(store.file(editable).readBytes().contentEquals(before)) { "Failed edit changed the saved PDF" }
+   check(store.list().any{it==editable}) { "Failed edit changed the document index" }
+   val updated=store.replace(editable,listOf(Uri.fromFile(File(store.file(editable).parentFile,"${editable.id}-1.jpg")),Uri.fromFile(image),Uri.fromFile(blue)),"Updated",0,false)
+   check(updated.pages==3 && updated.created==editable.created && updated.name=="Updated")
+   check(store.list().none{it.id==editable.id} && !store.file(editable).exists())
+   val first=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(updated).parentFile,"${updated.id}-0.jpg").absolutePath))
+   check(Color.blue(first.getPixel(30,30))>240 && Color.red(first.getPixel(30,30))<10) { "Reordered first page is incorrect" };first.recycle()
+   val reduced=store.replace(updated,listOf(Uri.fromFile(File(store.file(updated).parentFile,"${updated.id}-1.jpg"))),"Updated",0,false)
+   check(reduced.pages==1 && store.list().count{it.name=="Updated"}==1)
+   check(runCatching{store.replace(reduced,emptyList(),"Empty",0,false)}.isFailure)
+   check(store.file(reduced).exists() && store.list().any{it.id==reduced.id}) { "Removing every page must not destroy the document" }
+   store.delete(reduced)
    check(store.list().single().name == "Renamed")
    store.delete(doc)
    check(store.list().isEmpty() && !store.file(doc).exists())
    check(!previewFile.exists()) { "Deleting the document must remove its previews" }
    check(DocumentThumbnailLoader.load(store.file(doc),doc.id).image==null) { "Deleted files must not reuse a stale thumbnail" }
-   results.putString("stream", "PASS: bounded image/PDF thumbnails, broken/deleted file fallback, detection, analyzer mapping, perspective crop, PDF and document library\n")
+   results.putString("stream", "PASS: append/reorder/remove pages, failed-edit preservation, image export, bounded thumbnails, detection, crop, PDF and document library\n")
    finish(Activity.RESULT_OK, results)
   } catch (error: Throwable) {
    results.putString("stream", "FAIL: ${error.stackTraceToString()}")
