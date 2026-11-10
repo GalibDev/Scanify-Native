@@ -57,8 +57,12 @@ internal fun ScanReviewScreen(
  onMove:(Int,Int)->Unit,editing:Boolean=false
 ) {
  val current = page.coerceIn(0, pages.lastIndex)
- val bitmap by produceState<Bitmap?>(null, pages[current]) {
-  value = withContext(Dispatchers.IO) { runCatching { store.bitmap(Uri.parse(pages[current])) }.getOrNull() }
+ val bitmap by produceState<Bitmap?>(null, pages[current],rotation) {
+  value=null
+  value = withContext(Dispatchers.IO) { runCatching {
+   val source=store.bitmap(Uri.parse(pages[current]))
+   if(rotation==0)source else try{Bitmap.createBitmap(source,0,0,source.width,source.height,android.graphics.Matrix().apply{postRotate(rotation.toFloat())},true)}finally{source.recycle()}
+  }.getOrNull() }
  }
  val filter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(if (grayscale) 0f else 1f) })
  Column(Modifier.fillMaxSize().background(Color(0xFFF7F7F7))) {
@@ -68,7 +72,7 @@ internal fun ScanReviewScreen(
    WebIcon("edit", Modifier.padding(horizontal = 12.dp).size(20.dp), WebMuted)
   }
   Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp, vertical = 20.dp), contentAlignment = Alignment.Center) {
-   bitmap?.let { Image(it.asImageBitmap(), "Scanned page ${current + 1}", Modifier.fillMaxSize().rotate(rotation.toFloat()), contentScale = ContentScale.Fit, colorFilter = filter) } ?: Text("Loading page…", color = WebMuted)
+   bitmap?.let { Image(it.asImageBitmap(), "Scanned page ${current + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = filter) } ?: Text("Loading page…", color = WebMuted)
    FilledIconButton(onClick = { onRemove(current); onPage((current - 1).coerceAtLeast(0)) }, enabled = !busy && (!editing || pages.size>1), modifier = Modifier.align(Alignment.TopStart).size(40.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x88555555), contentColor = Color.White)) { WebIcon("trash", Modifier.size(19.dp), Color.White, "Delete current page") }
   }
   Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -97,7 +101,7 @@ internal fun ScanReviewScreen(
       Text(label, Modifier.fillMaxWidth().background(if (grayscale == gray) Teal else Color(0xFFF4F4F4)).padding(vertical = 6.dp), textAlign = TextAlign.Center, color = if (grayscale == gray) Color.White else WebText, fontSize = 12.sp)
      }
     }
-    Text("Filter and rotation\napply to all pages", Modifier.align(Alignment.CenterVertically).weight(1f), fontSize = 11.sp, lineHeight = 17.sp, color = WebMuted, textAlign = TextAlign.Center)
+    Text("Page ${current+1} only\n${rotation}° · ${if(grayscale)"Grayscale" else "Original"}", Modifier.align(Alignment.CenterVertically).weight(1f), fontSize = 11.sp, lineHeight = 17.sp, color = WebMuted, textAlign = TextAlign.Center)
    }
    HorizontalDivider(color = WebLine)
    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

@@ -11,6 +11,7 @@ import java.util.UUID
 import androidx.exifinterface.media.ExifInterface
 
 data class ScanDocument(val id: String, val name: String, val pages: Int, val created: Long)
+data class PageAdjustment(val rotation:Int=0,val grayscale:Boolean=false):java.io.Serializable
 
 class DocumentStore(private val context: Context) {
  private val root = File(context.filesDir, "documents").apply { mkdirs() }
@@ -63,9 +64,9 @@ class DocumentStore(private val context: Context) {
   return sources.map{androidx.core.content.FileProvider.getUriForFile(context,"${context.packageName}.files",it).toString()}
  }
  // Publish only after every page and the PDF have been written. Existing data survives failures.
- fun replace(doc:ScanDocument,uris:List<Uri>,name:String,rotation:Int,grayscale:Boolean):ScanDocument {
+ fun replace(doc:ScanDocument,uris:List<Uri>,name:String,rotation:Int,grayscale:Boolean,adjustments:List<PageAdjustment> = List(uris.size){PageAdjustment(rotation,grayscale)}):ScanDocument {
   require(list().any{it.id==doc.id}) { "Document no longer exists" }
-  val staged=create(uris,name,rotation,grayscale,publish=false).copy(created=doc.created)
+  val staged=create(uris,name,rotation,grayscale,publish=false,adjustments=adjustments).copy(created=doc.created)
   try {
    val current=list()
    check(current.any{it.id==doc.id})
@@ -75,14 +76,17 @@ class DocumentStore(private val context: Context) {
   return staged
  }
  private fun removeFiles(doc:ScanDocument) { file(doc).delete();(0 until doc.pages).forEach{File(root,"${doc.id}-$it.jpg").delete()} }
- fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean, publish:Boolean=true): ScanDocument {
+ fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean, publish:Boolean=true,adjustments:List<PageAdjustment> = List(uris.size){PageAdjustment(rotation,grayscale)}): ScanDocument {
   require(uris.isNotEmpty())
+  require(adjustments.size==uris.size && adjustments.all{it.rotation in listOf(0,90,180,270)})
   val doc = ScanDocument(UUID.randomUUID().toString(), name.trim().ifEmpty { "Scan" }, uris.size, System.currentTimeMillis())
   val target = file(doc)
   try {
    val pdf = PdfDocument()
    try {
     uris.forEachIndexed { i, uri ->
+     val rotation=adjustments[i].rotation
+     val grayscale=adjustments[i].grayscale
      val original = bitmap(uri)
      val image = if (rotation == 0) original else Bitmap.createBitmap(original, 0, 0, original.width, original.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
      val page = pdf.startPage(PdfDocument.PageInfo.Builder(595, 842, i + 1).create())

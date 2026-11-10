@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
   var editingId by rememberSaveable { mutableStateOf("") }
   var addPage by remember { mutableStateOf(false) }
   var name by rememberSaveable { mutableStateOf("Scan ${DateFormat.getDateInstance().format(Date())}") }
-  var rotation by rememberSaveable { mutableIntStateOf(0) }
+  var adjustments by rememberSaveable { mutableStateOf(arrayListOf<PageAdjustment>()) }
   var grayscale by rememberSaveable { mutableStateOf(false) }
   var busy by remember { mutableStateOf(false) }
   var search by rememberSaveable { mutableStateOf("") }
@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
     uris.forEach { try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { } }
     val imported = uris.map(Uri::toString)
     reviewPage=if(retakeIndex in draft.indices)retakeIndex else draft.size
+    adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment() else value}+List(imported.size-1){PageAdjustment()}) else ArrayList(adjustments+List(imported.size){PageAdjustment()})
     draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) imported.first() else value } + imported.drop(1)) else ArrayList(draft + imported)
     cameraOpen = false; retakeIndex = -1
    }
@@ -174,9 +175,9 @@ class MainActivity : ComponentActivity() {
          try {
           val existing=documents.find{it.id==editingId}
           check(editingId.isEmpty()||existing!=null) { "Original document is unavailable" }
-          val doc = withContext(Dispatchers.IO) { if(existing!=null)store.replace(existing,draft.map(Uri::parse),name,rotation,grayscale) else store.create(draft.map(Uri::parse), name, rotation, grayscale) }
+          val doc = withContext(Dispatchers.IO) { if(existing!=null)store.replace(existing,draft.map(Uri::parse),name,0,false,adjustments=adjustments) else store.create(draft.map(Uri::parse), name, 0, false,adjustments=adjustments) }
           draft.forEach { value -> val uri = Uri.parse(value); if (uri.authority == "$packageName.files") { val fileName = uri.lastPathSegment; if (fileName != null) File(cacheDir, "camera/$fileName").delete() } }
-          draft = arrayListOf(); rotation = 0; grayscale = false; reviewPage = 0;editingId=""
+          draft = arrayListOf(); adjustments = arrayListOf(); grayscale = false; reviewPage = 0;editingId=""
           refresh(); selectedId = doc.id; notice(if(existing!=null)"Document updated." else "PDF created and saved in Documents.")
          } catch (_: Exception) { notice("Could not create PDF. Try fewer or smaller images.") }
          finally { busy = false }
@@ -194,7 +195,7 @@ class MainActivity : ComponentActivity() {
    scope.launch {
     try {
      val pages=withContext(Dispatchers.IO){store.pageSources(doc)}
-     draft=ArrayList(pages);editingId=doc.id;name=doc.name;rotation=0;grayscale=false;reviewPage=0;retakeIndex=-1
+     draft=ArrayList(pages);adjustments=ArrayList(List(pages.size){PageAdjustment()});editingId=doc.id;name=doc.name;grayscale=false;reviewPage=0;retakeIndex=-1
      if(source=="camera")capture() else if(source=="images")images.launch(arrayOf("image/*"))
     } catch(_:Exception){notice("Could not open pages for editing. The saved document is unchanged.")}
     finally{busy=false}
@@ -217,19 +218,21 @@ class MainActivity : ComponentActivity() {
      owner = this@MainActivity, pageCount = draft.size, retaking = retakeIndex >= 0, grayscale = grayscale,
      onFilter = { grayscale = it }, onCaptured = { uri, finish, detected ->
       val capturedIndex = if (retakeIndex in draft.indices) retakeIndex else draft.size
+      adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment(grayscale=grayscale) else value}) else ArrayList(adjustments+PageAdjustment(grayscale=grayscale))
       draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
       retakeIndex = -1
       if (finish) { cameraOpen = false; reviewPage = capturedIndex; if(detected) cropIndex = capturedIndex }
      },
      onClose = { cameraOpen = false; retakeIndex = -1 }, onImport = { images.launch(arrayOf("image/*")) }
     ) else if (draft.isNotEmpty()) ScanReviewScreen(
-     store, draft, name, rotation, grayscale, busy,
+     store, draft, name, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.rotation, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.grayscale, busy,
      onName = { name = it }, onBack = { discard = true },
-     onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index }) },
+     onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index });adjustments=ArrayList(adjustments.filterIndexed{i,_->i!=index}) },
      onRetake = { index -> retakeIndex = index; capture() },
-     onRotate = { rotation = (rotation + 270) % 360 }, onFilter = { grayscale = it },
+     onRotate = { val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(rotation=(value.rotation+270)%360)else value}) },
+     onFilter = { gray -> val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(grayscale=gray)else value}) },
      onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
-     editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);draft=reordered;reviewPage=to}}
+     editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);val edits=ArrayList(adjustments);edits.add(to,edits.removeAt(from));draft=reordered;adjustments=edits;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameDocument(selected) }, onSave = { savePdf(selected) },
@@ -297,7 +300,7 @@ class MainActivity : ComponentActivity() {
   if (discard) AlertDialog(
    onDismissRequest = { discard = false }, title = { Text("Discard this scan?") },
    text = { Text("Your unsaved pages will be removed. Saved documents are kept.") },
-   confirmButton = { TextButton(onClick = { draft = arrayListOf(); rotation = 0; grayscale = false; discard = false;editingId="";reviewPage=0;retakeIndex=-1 }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
+   confirmButton = { TextButton(onClick = { draft = arrayListOf(); adjustments = arrayListOf(); grayscale = false; discard = false;editingId="";reviewPage=0;retakeIndex=-1 }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
    dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } }
   )
  }

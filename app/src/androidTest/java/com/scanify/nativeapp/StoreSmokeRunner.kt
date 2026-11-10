@@ -79,6 +79,27 @@ class StoreSmokeRunner : Instrumentation() {
    val blue=File(root,"blue.png")
    Bitmap.createBitmap(80,120,Bitmap.Config.ARGB_8888).also{bitmap->bitmap.eraseColor(Color.BLUE);blue.outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
    val editable=store.create(listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Editable",0,false)
+   val mixed=store.create(listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Mixed page settings",0,false,adjustments=listOf(PageAdjustment(90,true),PageAdjustment()))
+   val mixedFirst=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(mixed).parentFile,"${mixed.id}-0.jpg").absolutePath))
+   val mixedSecond=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(mixed).parentFile,"${mixed.id}-1.jpg").absolutePath))
+   check(mixedFirst.width==80 && mixedFirst.height==120) { "Selected page rotation was not saved" }
+   check(mixedSecond.width==80 && mixedSecond.height==120) { "Rotation leaked to the other page" }
+   val gray=mixedFirst.getPixel(40,60)
+   check(kotlin.math.abs(Color.red(gray)-Color.green(gray))<4 && kotlin.math.abs(Color.green(gray)-Color.blue(gray))<4)
+   val color=mixedSecond.getPixel(40,60)
+   check(Color.blue(color)>240 && Color.red(color)<10) { "Grayscale leaked to the other page" }
+   mixedFirst.recycle();mixedSecond.recycle()
+   PdfRenderer(ParcelFileDescriptor.open(store.file(mixed),ParcelFileDescriptor.MODE_READ_ONLY)).use{renderer->
+    (0..1).forEach{index->renderer.openPage(index).use{page->
+     val output=Bitmap.createBitmap(595,842,Bitmap.Config.ARGB_8888)
+     try{page.render(output,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);val pixel=output.getPixel(297,421)
+      if(index==0)check(kotlin.math.abs(Color.red(pixel)-Color.blue(pixel))<4)else check(Color.blue(pixel)>240 && Color.red(pixel)<10)
+     }finally{output.recycle()}
+    }}
+   }
+   check(runCatching{store.replace(mixed,listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Bad settings",0,false,adjustments=listOf(PageAdjustment()))}.isFailure)
+   check(store.list().any{it==mixed}) { "Invalid page settings must not replace the saved document" }
+   store.delete(mixed)
    val before=store.file(editable).readBytes()
    check(runCatching{store.replace(editable,listOf(Uri.fromFile(File(root,"missing.png"))),"Failed",0,false)}.isFailure)
    check(store.file(editable).readBytes().contentEquals(before)) { "Failed edit changed the saved PDF" }
@@ -98,7 +119,7 @@ class StoreSmokeRunner : Instrumentation() {
    check(store.list().isEmpty() && !store.file(doc).exists())
    check(!previewFile.exists()) { "Deleting the document must remove its previews" }
    check(DocumentThumbnailLoader.load(store.file(doc),doc.id).image==null) { "Deleted files must not reuse a stale thumbnail" }
-   results.putString("stream", "PASS: append/reorder/remove pages, failed-edit preservation, image export, bounded thumbnails, detection, crop, PDF and document library\n")
+   results.putString("stream", "PASS: independent page rotation/grayscale in previews and PDF, append/reorder/remove, failed-edit preservation, image export, thumbnails, detection, crop and library\n")
    finish(Activity.RESULT_OK, results)
   } catch (error: Throwable) {
    results.putString("stream", "FAIL: ${error.stackTraceToString()}")
