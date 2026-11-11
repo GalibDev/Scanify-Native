@@ -80,6 +80,32 @@ class StoreSmokeRunner : Instrumentation() {
    Bitmap.createBitmap(80,120,Bitmap.Config.ARGB_8888).also{bitmap->bitmap.eraseColor(Color.BLUE);blue.outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
    val editable=store.create(listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Editable",0,false)
    val mixed=store.create(listOf(Uri.fromFile(image),Uri.fromFile(blue)),"Mixed page settings",0,false,adjustments=listOf(PageAdjustment(90,true),PageAdjustment()))
+   val longImage = DocumentImageExport.renderLongImage(store.file(mixed), root, mixed.name)
+   val stitched = checkNotNull(android.graphics.BitmapFactory.decodeFile(longImage.absolutePath))
+   try {
+    check(stitched.width == 1200 && stitched.height in 3300..3500)
+    val upper = stitched.getPixel(stitched.width / 2, stitched.height / 4)
+    val lower = stitched.getPixel(stitched.width / 2, stitched.height * 3 / 4)
+    check(Color.red(upper) < 240 && kotlin.math.abs(Color.red(upper) - Color.blue(upper)) < 4)
+    check(Color.blue(lower) > 240 && Color.red(lower) < 10) { "Long image page order or color changed" }
+   } finally { stitched.recycle() }
+   val manyPages = File(root, "many-pages.pdf")
+   val pdf = android.graphics.pdf.PdfDocument()
+   try {
+    repeat(12) { index ->
+     val page = pdf.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(100, 200, index + 1).create())
+     page.canvas.drawColor(if (index == 11) Color.GREEN else Color.RED)
+     pdf.finishPage(page)
+    }
+    manyPages.outputStream().use { pdf.writeTo(it) }
+   } finally { pdf.close() }
+   val bounded = DocumentImageExport.renderLongImage(manyPages, root, "Many pages")
+   val tall = checkNotNull(android.graphics.BitmapFactory.decodeFile(bounded.absolutePath))
+   try {
+    check(tall.width < 1200 && tall.height in 7900..8000)
+    val last = tall.getPixel(tall.width / 2, tall.height - 20)
+    check(Color.green(last) > 240 && Color.red(last) < 10) { "Last page missing from bounded export" }
+   } finally { tall.recycle() }
    val mixedFirst=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(mixed).parentFile,"${mixed.id}-0.jpg").absolutePath))
    val mixedSecond=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(mixed).parentFile,"${mixed.id}-1.jpg").absolutePath))
    check(mixedFirst.width==80 && mixedFirst.height==120) { "Selected page rotation was not saved" }

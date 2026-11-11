@@ -116,13 +116,16 @@ class MainActivity : ComponentActivity() {
   }
   fun capture() { cameraOpen = true }
   fun share(doc: ScanDocument) { shareStatus="";shareId=doc.id }
-  fun exportImages(doc:ScanDocument,photos:Boolean) {
+  fun exportImages(doc:ScanDocument,photos:Boolean,longImage:Boolean=false) {
    if(busy)return
-   busy=true;shareStatus="Preparing page images…"
+   busy=true;shareStatus=if(longImage)"Preparing long image…" else "Preparing page images…"
    scope.launch {
     var rendered:List<File> = emptyList()
     try {
-     rendered=withContext(Dispatchers.IO){DocumentImageExport.render(store.file(doc),cacheDir,doc.name)}
+     rendered=withContext(Dispatchers.IO){
+      if(longImage) listOf(DocumentImageExport.renderLongImage(store.file(doc),cacheDir,doc.name))
+      else DocumentImageExport.render(store.file(doc),cacheDir,doc.name)
+     }
      if(photos) {
       val count=withContext(Dispatchers.IO){DocumentImageExport.savePhotos(this@MainActivity,rendered)}
       shareStatus="$count page image(s) saved to Pictures/Scanify."
@@ -134,8 +137,8 @@ class MainActivity : ComponentActivity() {
        clipData=ClipData.newRawUri(doc.name,uris.first()).apply{uris.drop(1).forEach{addItem(ClipData.Item(it))}}
        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
-      startActivity(Intent.createChooser(intent,"Share ${doc.name} as images"))
-      shareStatus="Choose an app to share ${uris.size} page image(s)."
+      startActivity(Intent.createChooser(intent,if(longImage)"Share ${doc.name} as a long image" else "Share ${doc.name} as images"))
+      shareStatus=if(longImage)"Choose an app to share the long image." else "Choose an app to share ${uris.size} page image(s)."
      }
     } catch(_:Exception) { shareStatus="Could not export page images. Check storage and try again." }
     finally {
@@ -284,7 +287,8 @@ class MainActivity : ComponentActivity() {
   if(shareDoc!=null) DocumentSharePanel(shareDoc,store.file(shareDoc),busy,shareStatus,
    onClose={shareId="";shareStatus=""},onRename={renameDocument(shareDoc)},
    onSave={shareStatus="";savePdf(shareDoc)},onSend={shareStatus="";sendPdf(shareDoc)},
-   onImages={exportImages(shareDoc,false)},onPhotos={savePhotos(shareDoc)})
+   onImages={exportImages(shareDoc,false)},onPhotos={savePhotos(shareDoc)},
+   onLongImage={exportImages(shareDoc,photos=false,longImage=true)})
   if (rename && actionDoc != null) AlertDialog(onDismissRequest = { if(!busy){rename = false; actionId = ""} }, title = { Text("Rename document") }, text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, singleLine = true, enabled = !busy) }, confirmButton = {
    TextButton(enabled = !busy && renameText.isNotBlank(), onClick = { scope.launch { busy=true;try { withContext(Dispatchers.IO) { store.rename(actionDoc, renameText) }; refresh(); rename = false; actionId = "" } catch (_: Exception) { notice("Could not rename document.") } finally { busy=false } } }) { Text("Save") }
   }, dismissButton = { TextButton(enabled = !busy, onClick = { rename = false; actionId = "" }) { Text("Cancel") } })

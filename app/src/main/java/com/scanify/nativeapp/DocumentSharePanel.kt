@@ -27,7 +27,7 @@ import java.util.Locale
 @Composable
 internal fun DocumentSharePanel(
  doc:ScanDocument,file:File,busy:Boolean,statusMessage:String,
- onClose:()->Unit,onRename:()->Unit,onSave:()->Unit,onSend:()->String?,onImages:()->Unit,onPhotos:()->Unit
+ onClose:()->Unit,onRename:()->Unit,onSave:()->Unit,onSend:()->String?,onImages:()->Unit,onPhotos:()->Unit,onLongImage:()->Unit
 ) {
  val state=rememberModalBottomSheetState(skipPartiallyExpanded=true,confirmValueChange={!busy})
  var linkInfo by rememberSaveable(doc.id){mutableStateOf(false)}
@@ -78,7 +78,7 @@ internal fun DocumentSharePanel(
       HorizontalDivider(color=Color(0xFFEEEEEE))
       ShareOption("Share as Images","images",available,onClick=onImages)
       HorizontalDivider(color=Color(0xFFEEEEEE))
-      ShareOption("Share as Long Image","images",false,"Soon"){}
+      ShareOption("Share as Long Image","images",available,onClick=onLongImage)
       HorizontalDivider(color=Color(0xFFEEEEEE))
       ShareOption("Save to Photos","download",available,onClick=onPhotos)
      }

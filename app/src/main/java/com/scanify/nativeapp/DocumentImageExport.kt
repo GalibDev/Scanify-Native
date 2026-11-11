@@ -3,6 +3,7 @@ package com.scanify.nativeapp
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.media.MediaScannerConnection
@@ -16,10 +17,57 @@ import java.util.UUID
 import kotlin.math.roundToInt
 
 internal object DocumentImageExport {
+ fun renderLongImage(pdf: File, cache: File, name: String): File {
+  val maxHeight = 8000
+  val folder = File(cache, "shared-images/${UUID.randomUUID()}").apply { check(mkdirs()) }
+  try {
+   return PdfRenderer(ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+    require(renderer.pageCount in 1 until maxHeight)
+    val ratios = (0 until renderer.pageCount).map { index ->
+     renderer.openPage(index).use { page -> page.height.toDouble() / page.width }
+    }
+    // Leave space for rounding each page up to a whole pixel.
+    val targetWidth = minOf(1200.0, (maxHeight - ratios.size) / ratios.sum())
+    val width = kotlin.math.ceil(targetWidth).toInt()
+    val heights = ratios.map { kotlin.math.ceil(it * targetWidth).toInt().coerceAtLeast(1) }
+    val stitched = Bitmap.createBitmap(width, heights.sum(), Bitmap.Config.ARGB_8888)
+    try {
+     stitched.eraseColor(Color.WHITE)
+     val canvas = Canvas(stitched)
+     var top = 0
+     heights.forEachIndexed { index, height ->
+      renderer.openPage(index).use { page ->
+       val tile = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+       try {
+        tile.eraseColor(Color.WHITE)
+        page.render(tile, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+        canvas.drawBitmap(tile, 0f, top.toFloat(), null)
+       } finally {
+        tile.recycle()
+       }
+      }
+      top += height
+     }
+     File(folder, "${safeName(name)}-long.jpg").also { output ->
+      output.outputStream().use { check(stitched.compress(Bitmap.CompressFormat.JPEG, 92, it)) }
+     }
+    } finally {
+     stitched.recycle()
+    }
+   }
+  } catch (error: Exception) {
+   folder.deleteRecursively()
+   throw error
+  }
+ }
+
+ private fun safeName(name: String) =
+  name.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(80).ifBlank { "Scanify" }
+
  // Render one page at a time; never hold a complete document's bitmaps in memory.
  fun render(pdf:File,cache:File,name:String):List<File> {
   val folder=File(cache,"shared-images/${UUID.randomUUID()}").apply{check(mkdirs())}
-  val safe=name.replace(Regex("[^\\p{L}\\p{N} ._-]"),"_").take(80).ifBlank{"Scanify"}
+  val safe=safeName(name)
   try {
    return PdfRenderer(ParcelFileDescriptor.open(pdf,ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
     check(renderer.pageCount>0)
