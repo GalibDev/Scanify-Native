@@ -72,6 +72,10 @@ class MainActivity : ComponentActivity() {
   var selectedId by rememberSaveable { mutableStateOf("") }
   var editingId by rememberSaveable { mutableStateOf("") }
   var addPage by remember { mutableStateOf(false) }
+  var morePage by rememberSaveable { mutableIntStateOf(-1) }
+  var showDocumentInfo by rememberSaveable { mutableStateOf(false) }
+  var photoDocumentId by rememberSaveable { mutableStateOf("") }
+  var photoPage by rememberSaveable { mutableIntStateOf(-1) }
   var name by rememberSaveable { mutableStateOf("Scan ${DateFormat.getDateInstance().format(Date())}") }
   var adjustments by rememberSaveable { mutableStateOf(arrayListOf<PageAdjustment>()) }
   var grayscale by rememberSaveable { mutableStateOf(false) }
@@ -116,7 +120,7 @@ class MainActivity : ComponentActivity() {
   }
   fun capture() { cameraOpen = true }
   fun share(doc: ScanDocument) { shareStatus="";shareId=doc.id }
-  fun exportImages(doc:ScanDocument,photos:Boolean,longImage:Boolean=false) {
+  fun exportImages(doc:ScanDocument,photos:Boolean,longImage:Boolean=false,pageIndex:Int?=null) {
    if(busy)return
    busy=true;shareStatus=if(longImage)"Preparing long image…" else "Preparing page images…"
    scope.launch {
@@ -124,11 +128,12 @@ class MainActivity : ComponentActivity() {
     try {
      rendered=withContext(Dispatchers.IO){
       if(longImage) listOf(DocumentImageExport.renderLongImage(store.file(doc),cacheDir,doc.name))
-      else DocumentImageExport.render(store.file(doc),cacheDir,doc.name)
+      else DocumentImageExport.render(store.file(doc),cacheDir,doc.name,pageIndex)
      }
      if(photos) {
       val count=withContext(Dispatchers.IO){DocumentImageExport.savePhotos(this@MainActivity,rendered)}
       shareStatus="$count page image(s) saved to Pictures/Scanify."
+      if(shareId!=doc.id)notice(shareStatus)
      } else {
       val uris=ArrayList(rendered.map{FileProvider.getUriForFile(this@MainActivity,"$packageName.files",it)})
       val intent=Intent(if(uris.size==1)Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
@@ -140,7 +145,10 @@ class MainActivity : ComponentActivity() {
       startActivity(Intent.createChooser(intent,if(longImage)"Share ${doc.name} as a long image" else "Share ${doc.name} as images"))
       shareStatus=if(longImage)"Choose an app to share the long image." else "Choose an app to share ${uris.size} page image(s)."
      }
-    } catch(_:Exception) { shareStatus="Could not export page images. Check storage and try again." }
+    } catch(_:Exception) {
+     shareStatus="Could not export page images. Check storage and try again."
+     if(shareId!=doc.id)notice(shareStatus)
+    }
     finally {
      if(photos)withContext(Dispatchers.IO){rendered.firstOrNull()?.parentFile?.deleteRecursively()}
      busy=false
@@ -148,13 +156,20 @@ class MainActivity : ComponentActivity() {
    }
   }
   val photoPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-   if(granted)documents.find{it.id==shareId}?.let{exportImages(it,true)}
-   else shareStatus="Photo access was denied. You can still share images to another app."
+   val doc=documents.find{it.id==photoDocumentId}
+   val pageIndex=photoPage.takeIf{it>=0}
+   photoDocumentId="";photoPage=-1
+   if(granted && doc!=null)exportImages(doc,true,pageIndex=pageIndex)
+   else if(!granted){
+    shareStatus="Photo access was denied. You can still share images to another app."
+    if(shareId.isEmpty())notice(shareStatus)
+   }
   }
-  fun savePhotos(doc:ScanDocument) {
-   if(android.os.Build.VERSION.SDK_INT<29 && androidx.core.content.ContextCompat.checkSelfPermission(this,android.Manifest.permission.WRITE_EXTERNAL_STORAGE)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+  fun savePhotos(doc:ScanDocument,pageIndex:Int?=null) {
+   if(android.os.Build.VERSION.SDK_INT<29 && androidx.core.content.ContextCompat.checkSelfPermission(this,android.Manifest.permission.WRITE_EXTERNAL_STORAGE)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+    photoDocumentId=doc.id;photoPage=pageIndex ?: -1
     photoPermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-   else exportImages(doc,true)
+   } else exportImages(doc,true,pageIndex=pageIndex)
   }
   fun sendPdf(doc: ScanDocument):String? {
    return try {
@@ -191,6 +206,7 @@ class MainActivity : ComponentActivity() {
    export.launch(doc.name.replace('/', '_').replace('\\', '_') + ".pdf")
   }
   fun renameDocument(doc: ScanDocument) { actionId=doc.id;renameText=doc.name;rename=true }
+  fun openDocumentMore(doc:ScanDocument) { selectedId=doc.id;morePage=0 }
   fun deleteDocument(doc: ScanDocument) { actionId=doc.id;deleting=true }
   fun editDocument(doc:ScanDocument,source:String="") {
    if(busy)return
@@ -238,11 +254,11 @@ class MainActivity : ComponentActivity() {
      editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);val edits=ArrayList(adjustments);edits.add(to,edits.removeAt(from));draft=reordered;adjustments=edits;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
-     onRename = { renameDocument(selected) }, onSave = { savePdf(selected) },
-     onShare = { share(selected) }, onDelete = { deleteDocument(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
+     onRename = { renameDocument(selected) }, onMore = { morePage=it },
+     onShare = { share(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
     ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
      DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={images.launch(arrayOf("image/*"))},
-      onOpen={selectedId=it.id},onRename=::renameDocument,onSave=::savePdf,onShare=::share,onDelete=::deleteDocument,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
+      onOpen={selectedId=it.id},onMore=::openDocumentMore,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
     } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { images.launch(arrayOf("image/*")) }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
@@ -270,7 +286,7 @@ class MainActivity : ComponentActivity() {
        item { WebSection(if (search.isNotBlank()) "Search Results" else "Recent Documents", "View All", { tab = "Documents" }, visible.size) }
        if (visible.isEmpty()) item { WebEmpty({ images.launch(arrayOf("image/*")) }, search.isNotBlank()) }
        items(if (tab == "Home" && search.isBlank()) visible.take(3) else visible, key = { it.id }) { doc ->
-        DocumentLibraryCard(doc,store.file(doc),onOpen={selectedId=doc.id},onRename={renameDocument(doc)},onSave={savePdf(doc)},onShare={share(doc)},onDelete={deleteDocument(doc)})
+        DocumentLibraryCard(doc,store.file(doc),onOpen={selectedId=doc.id},onMore={openDocumentMore(doc)})
        }
 
       }
@@ -279,6 +295,26 @@ class MainActivity : ComponentActivity() {
     if (busy) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.65f)).clickable { }, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
    }
   }
+  if(morePage>=0 && selected!=null) DocumentMorePanel(selected,store.file(selected),onClose={morePage=-1}) { action ->
+   val page=morePage
+   morePage=-1
+   when(action) {
+    "Rename" -> renameDocument(selected)
+    "Document Info" -> showDocumentInfo=true
+    "Edit PDF", "Manage Pages" -> editDocument(selected)
+    "Send to PC" -> savePdf(selected)
+    "Save Image" -> savePhotos(selected,page)
+    "PDF to Images" -> exportImages(selected,photos=false)
+    "Share PDF" -> sendPdf(selected)?.let(::notice)
+    "Delete This Document" -> deleteDocument(selected)
+    else -> unavailable=action
+   }
+  }
+  if(showDocumentInfo && selected!=null) AlertDialog(
+   onDismissRequest={showDocumentInfo=false},title={Text("Document Info")},
+   text={Text("${selected.name}\nPDF · ${selected.pages} page(s)\n${DateFormat.getDateInstance().format(Date(selected.created))}")},
+   confirmButton={TextButton(onClick={showDocumentInfo=false}){Text("Done")}}
+  )
   if(addPage && selected!=null)AlertDialog(onDismissRequest={addPage=false},title={Text("Add Page")},text={Column{
    Text("Add a scan or import images. Review your pages before saving.")
    TextButton(onClick={editDocument(selected,"camera")}){Text("Scan with Camera")}

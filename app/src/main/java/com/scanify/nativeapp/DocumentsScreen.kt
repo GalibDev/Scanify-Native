@@ -35,8 +35,8 @@ import java.util.Locale
 @Composable
 internal fun DocumentsScreen(
  store:DocumentStore,documents:List<ScanDocument>,onProfile:()->Unit,onImport:()->Unit,
- onOpen:(ScanDocument)->Unit,onRename:(ScanDocument)->Unit,onSave:(ScanDocument)->Unit,
- onShare:(ScanDocument)->Unit,onDelete:(ScanDocument)->Unit,onUnavailable:(String)->Unit,onNotifications:()->Unit
+ onOpen:(ScanDocument)->Unit,
+ onMore:(ScanDocument)->Unit,onUnavailable:(String)->Unit,onNotifications:()->Unit
 ) {
  val preferences=LocalContext.current.getSharedPreferences("scanify-library",0)
  var grid by rememberSaveable { mutableStateOf(preferences.getBoolean("grid",false)) }
@@ -111,16 +111,15 @@ internal fun DocumentsScreen(
   }
   if(grid)items(visible.chunked(2),key={row->row.joinToString{it.id}}){row->
    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-    row.forEach{doc->DocumentLibraryCard(doc,store.file(doc),true,Modifier.weight(1f),{onOpen(doc)},{onRename(doc)},{onSave(doc)},{onShare(doc)},{onDelete(doc)})}
+    row.forEach{doc->DocumentLibraryCard(doc,store.file(doc),true,Modifier.weight(1f),{onOpen(doc)},{onMore(doc)})}
     if(row.size==1)Spacer(Modifier.weight(1f))
    }
-  } else items(visible,key={it.id}){doc->DocumentLibraryCard(doc,store.file(doc),false,onOpen={onOpen(doc)},onRename={onRename(doc)},onSave={onSave(doc)},onShare={onShare(doc)},onDelete={onDelete(doc)})}
+  } else items(visible,key={it.id}){doc->DocumentLibraryCard(doc,store.file(doc),false,onOpen={onOpen(doc)},onMore={onMore(doc)})}
  }
 }
 
 @Composable
-internal fun DocumentLibraryCard(doc:ScanDocument,file:File,grid:Boolean=false,modifier:Modifier=Modifier,onOpen:()->Unit,onRename:()->Unit,onSave:()->Unit,onShare:()->Unit,onDelete:()->Unit) {
- var menu by remember(doc.id){mutableStateOf(false)}
+internal fun DocumentLibraryCard(doc:ScanDocument,file:File,grid:Boolean=false,modifier:Modifier=Modifier,onOpen:()->Unit,onMore:()->Unit) {
  val result by produceState<DocumentThumbnail?>(null,doc.id,file.absolutePath){value=withContext(Dispatchers.IO){DocumentThumbnailLoader.load(file,doc.id)}}
  val metadata="PDF · ${DateFormat.getDateInstance(DateFormat.MEDIUM,Locale.US).format(Date(doc.created))} · ${doc.pages} ${if(doc.pages==1)"page"else"pages"}" + (result?.let{" · ${fileSize(it.bytes)}"}?:"")
  @Composable fun thumbnail(modifier:Modifier) {
@@ -129,12 +128,7 @@ internal fun DocumentLibraryCard(doc:ScanDocument,file:File,grid:Boolean=false,m
   }
  }
  @Composable fun actions() {
-  Box {
-   IconButton(onClick={menu=true},modifier=Modifier.size(34.dp)){WebIcon("more",Modifier.size(20.dp),WebMuted,"Actions for ${doc.name}")}
-   DropdownMenu(expanded=menu,onDismissRequest={menu=false}) {
-    listOf("Open" to onOpen,"Rename" to onRename,"Save PDF" to onSave,"Share" to onShare,"Delete" to onDelete).forEach{(label,action)->DropdownMenuItem(text={Text(label,color=if(label=="Delete")MaterialTheme.colorScheme.error else WebText)},onClick={menu=false;action()})}
-   }
-  }
+  IconButton(onClick=onMore,modifier=Modifier.size(34.dp)){WebIcon("more",Modifier.size(20.dp),WebMuted,"Actions for ${doc.name}")}
  }
  Surface(onClick=onOpen,modifier=modifier.fillMaxWidth(),shape=RoundedCornerShape(11.dp),color=Color.White,border=BorderStroke(1.dp,WebLine)) {
   if(grid)Column(Modifier.padding(8.dp),verticalArrangement=Arrangement.spacedBy(7.dp)) {

@@ -116,9 +116,8 @@ internal fun ScanReviewScreen(
 }
 
 @Composable
-internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> Unit, onRename: () -> Unit, onSave: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit, onUnavailable: (String) -> Unit,onAdd:()->Unit,onEdit:()->Unit) {
+internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> Unit, onRename: () -> Unit, onMore: (Int) -> Unit, onShare: () -> Unit, onUnavailable: (String) -> Unit,onAdd:()->Unit,onEdit:()->Unit) {
  var page by rememberSaveable(doc.id) { mutableIntStateOf(0) }
- var more by remember { mutableStateOf(false) }
  var grid by rememberSaveable(doc.id) { mutableStateOf(false) }
  val maxPreviewHeight = (LocalConfiguration.current.screenHeightDp * 0.53f).dp
  var renderError by remember { mutableStateOf(false) }
@@ -139,14 +138,7 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
    Surface(onClick = { onUnavailable("Tags") }, shape = RoundedCornerShape(4.dp), border = BorderStroke(1.dp, Color(0xFFDDDDDD)), color = Color.White) { Text("Tag +", Modifier.padding(horizontal = 5.dp, vertical = 3.dp), fontSize = 11.sp, color = Color.Gray) }
    IconButton(onClick = { grid = !grid }, modifier = Modifier.size(34.dp)) { WebIcon("grid", Modifier.size(20.dp), if(grid) ReaderTeal else Color(0xFF292929), "Show pages") }
    IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) { WebIcon("select", Modifier.size(21.dp), Color(0xFF292929), "Manage pages") }
-   Box {
-    IconButton(onClick = { more = true }, modifier = Modifier.size(34.dp)) { WebIcon("more", Modifier.size(23.dp), Color(0xFF292929), "More document actions") }
-    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-     DropdownMenuItem(text = { Text("Save PDF") }, onClick = { more = false; onSave() })
-     DropdownMenuItem(text = { Text("Rename") }, onClick = { more = false; onRename() })
-     DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, onClick = { more = false; onDelete() })
-    }
-   }
+   IconButton(onClick = { onMore(page) }, modifier = Modifier.size(34.dp)) { WebIcon("more", Modifier.size(23.dp), Color(0xFF292929), "More document actions") }
   }
   Box(Modifier.fillMaxWidth().weight(1f)) {
    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {

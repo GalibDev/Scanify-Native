@@ -65,13 +65,14 @@ internal object DocumentImageExport {
   name.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(80).ifBlank { "Scanify" }
 
  // Render one page at a time; never hold a complete document's bitmaps in memory.
- fun render(pdf:File,cache:File,name:String):List<File> {
+ fun render(pdf:File,cache:File,name:String,pageIndex:Int?=null):List<File> {
   val folder=File(cache,"shared-images/${UUID.randomUUID()}").apply{check(mkdirs())}
   val safe=safeName(name)
   try {
    return PdfRenderer(ParcelFileDescriptor.open(pdf,ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
     check(renderer.pageCount>0)
-    (0 until renderer.pageCount).map { index ->
+    val pages = if (pageIndex == null) 0 until renderer.pageCount else pageIndex..pageIndex
+    pages.map { index ->
      renderer.openPage(index).use { page ->
       val scale=2400f/maxOf(page.width,page.height)
       val bitmap=Bitmap.createBitmap((page.width*scale).roundToInt().coerceAtLeast(1),(page.height*scale).roundToInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888)
