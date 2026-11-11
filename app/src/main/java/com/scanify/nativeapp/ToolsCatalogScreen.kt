@@ -31,11 +31,16 @@ import androidx.compose.ui.unit.sp
 private data class CatalogTool(val label:String,val icon:String,val tone:String="violet",val letters:String="",val action:String="")
 private data class CatalogSection(val title:String,val icon:String,val tools:List<CatalogTool>)
 private val catalog = listOf(
- CatalogSection("Scan","scan",listOf(CatalogTool("Smart Scan","scan","mint",action="scan"),CatalogTool("Book Scan","book","blue"),CatalogTool("Whiteboard","board"),CatalogTool("Mega Scan","scan","orange"),CatalogTool("ID Cards","id","mint"),CatalogTool("Import Images","images","blue",action="import"))),
+ CatalogSection("Scan","scan",listOf(
+  CatalogTool("ID Cards","id","mint"), CatalogTool("Extract Text","text","mint"), CatalogTool("ID Photo Maker","portrait","blue"), CatalogTool("Formula","formula","mint"),
+  CatalogTool("photo translation","translate","blue"), CatalogTool("Book","book","cyan"), CatalogTool("PPT","ppt","orange"), CatalogTool("Whiteboard","board","cyan"),
+  CatalogTool("Timestamp","timestamp","blue"), CatalogTool("Mega Scan","mega","mint"), CatalogTool("Smart Scan","scan","mint",action="scan")
+ )),
+ CatalogSection("Import","images",listOf(CatalogTool("Import Images","images","mint",action="import"), CatalogTool("Import Files","folder","blue"))),
  CatalogSection("PDF Tools","file",listOf(CatalogTool("Merge PDF","layers"),CatalogTool("Split PDF","columns"),CatalogTool("Compress PDF","download"),CatalogTool("Organize Pages","rotate"))),
  CatalogSection("Convert","switch",listOf(CatalogTool("To Word","file","blue","W"),CatalogTool("To Excel","file","mint","X"),CatalogTool("To PPT","board","orange","P"),CatalogTool("PDF to Images","images","blue"),CatalogTool("Images to PDF","images","blue",action="import"))),
  CatalogSection("Edit & Secure","edit",listOf(CatalogTool("Sign","sign","blue"),CatalogTool("Watermark PDF","stamp"),CatalogTool("Lock","lock","orange"),CatalogTool("Erase Marks","erase"),CatalogTool("Annotate PDF","edit"))),
- CatalogSection("Utilities","grid",listOf(CatalogTool("Extract Text","text","mint"),CatalogTool("Measure","ruler","mint"),CatalogTool("Ask AI","sparkles","mint"),CatalogTool("Print","print","blue"),CatalogTool("QR Code","qr","mint")))
+ CatalogSection("Utilities","grid",listOf(CatalogTool("Measure","ruler","mint"),CatalogTool("Ask AI","sparkles","mint"),CatalogTool("Print","print","blue"),CatalogTool("QR Code","qr","mint")))
 )
 
 @Composable
@@ -93,7 +98,7 @@ internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Uni
       Text(section.title,Modifier.weight(1f),fontSize=19.sp,fontWeight=FontWeight.Normal,color=WebText,letterSpacing=(-.5).sp)
       if(category.isEmpty())TextButton(onClick={category=section.title},modifier=Modifier.height(30.dp),contentPadding=PaddingValues(0.dp)) { Text("See All",fontSize=12.sp);Spacer(Modifier.width(5.dp));WebIcon("arrow",Modifier.size(16.dp)) }
      }
-     CatalogGrid(if(category.isEmpty())section.tools.take(4) else section.tools,onScan,onImport)
+     CatalogGrid(if(category.isEmpty())section.tools.take(if(section.title=="Scan") 10 else 4) else section.tools,onScan,onImport)
     }
    }
   }
@@ -106,16 +111,29 @@ private fun CatalogGrid(tools:List<CatalogTool>,onScan:()->Unit,onImport:()->Uni
   tools.chunked(4).forEach { row ->
    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
     row.forEach { tool ->
-     val color=when(tool.tone){"blue"->Color(0xFF167BEA);"mint"->Color(0xFF00A48C);"orange"->Color(0xFFEF7300);else->Color(0xFF832BEF)}
-     Surface(onClick={when(tool.action){"scan"->onScan();"import"->onImport()}},enabled=tool.action.isNotEmpty(),modifier=Modifier.weight(1f).heightIn(min=88.dp),color=Color.White,shape=RoundedCornerShape(17.dp),border=BorderStroke(1.dp,WebLine),shadowElevation=.3.dp) {
-      Column(Modifier.padding(horizontal=3.dp,vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(4.dp)) {
-       Box(Modifier.size(42.dp).background(color.copy(alpha=.12f),RoundedCornerShape(13.dp)),contentAlignment=Alignment.Center) {
-        if(tool.letters.isNotEmpty())Box(Modifier.size(28.dp).background(when(tool.tone){"mint"->Color(0xFF008E63);"orange"->Color(0xFFD95708);else->Color(0xFF177DEC)},RoundedCornerShape(6.dp)),contentAlignment=Alignment.Center){Text(tool.letters,fontSize=19.sp,fontWeight=FontWeight.Bold,color=Color.White)}
-        else WebIcon(tool.icon,Modifier.size(28.dp),color)
-       }
-       Text(tool.label,fontSize=11.sp,lineHeight=13.sp,fontWeight=FontWeight.SemiBold,color=WebText,textAlign=TextAlign.Center)
-       if(tool.action.isEmpty())Text("Soon",fontSize=9.sp,lineHeight=10.sp,color=WebMuted)
+     val (color, backdrop) = when (tool.tone) {
+      "blue" -> Color(0xFF437EE1) to Color(0xFFE7ECFA)
+      "mint" -> Color(0xFF0FAF9F) to Color(0xFFDCF1EE)
+      "cyan" -> Color(0xFF09A9C8) to Color(0xFFDDF1F6)
+      "orange" -> Color(0xFFEE692E) to Color(0xFFFBEAE4)
+      else -> Color(0xFF7954D4) to Color(0xFFEFE8FA)
+     }
+     Column(
+      Modifier.weight(1f).heightIn(min = 99.dp)
+       .clickable(enabled = tool.action.isNotEmpty()) {
+        when (tool.action) { "scan" -> onScan(); "import" -> onImport() }
+       }.padding(horizontal = 2.dp, vertical = 5.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+     ) {
+      Box(Modifier.size(64.dp).background(backdrop, CircleShape), contentAlignment = Alignment.Center) {
+       if (tool.letters.isNotEmpty()) {
+        Box(Modifier.size(29.dp).background(color, RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {
+         Text(tool.letters, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+       } else CatalogToolGlyph(tool.icon, color, backdrop)
       }
+      Text(tool.label, fontSize = 12.sp, lineHeight = 14.sp, color = WebText, textAlign = TextAlign.Center)
      }
     }
     repeat(4-row.size) { Spacer(Modifier.weight(1f)) }
