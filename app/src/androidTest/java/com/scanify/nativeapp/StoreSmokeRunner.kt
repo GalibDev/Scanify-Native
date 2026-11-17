@@ -26,6 +26,18 @@ class StoreSmokeRunner : Instrumentation() {
     bitmap.recycle()
    }
    val store = DocumentStore(isolated)
+   val filterSource = Bitmap.createBitmap(48,32,Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(80,120,160)) }
+   ScanFilters.names.filter { it != "Remove Handwriting" }.forEach { filter ->
+    val filtered = ScanFilters.apply(filterSource,filter)
+    check(filtered.width==48 && filtered.height==32)
+    val pixel=filtered.getPixel(20,20)
+    if(filter=="Grayscale" || filter=="Eco" || filter=="B&W")check(Color.red(pixel)==Color.green(pixel) && Color.green(pixel)==Color.blue(pixel))
+    if(filter=="Invert")check(Color.red(pixel)==175 && Color.green(pixel)==135 && Color.blue(pixel)==95)
+    if(filter=="Lighten")check(Color.red(pixel)==92 && Color.green(pixel)==138 && Color.blue(pixel)==184)
+    if(filtered!==filterSource)filtered.recycle()
+   }
+   check(filterSource.getPixel(20,20)==Color.rgb(80,120,160))
+   filterSource.recycle()
    testDocumentDetection()
    testPerspectiveCrop(store, root)
    check(store.list().isEmpty())

@@ -36,6 +36,19 @@ private val Purple = Color(0xFF7C3AED)
 private val Background = WebBackground
 
 class MainActivity : ComponentActivity() {
+ internal var cameraVolumeAction: (() -> Unit)? = null
+ override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+  val action = cameraVolumeAction
+  if (action != null && keyCode in listOf(android.view.KeyEvent.KEYCODE_VOLUME_UP, android.view.KeyEvent.KEYCODE_VOLUME_DOWN)) {
+   if (event.repeatCount == 0) action()
+   return true
+  }
+  return super.onKeyDown(keyCode, event)
+ }
+ override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean {
+  if(cameraVolumeAction != null && keyCode in listOf(android.view.KeyEvent.KEYCODE_VOLUME_UP, android.view.KeyEvent.KEYCODE_VOLUME_DOWN))return true
+  return super.onKeyUp(keyCode,event)
+ }
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
   enableEdgeToEdge()

@@ -43,6 +43,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.Observer
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -60,7 +67,14 @@ internal fun NativeCameraScreen(
  var requested by rememberSaveable { mutableStateOf(false) }
  val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it; requested = true }
  var front by rememberSaveable { mutableStateOf(false) }
- var hd by rememberSaveable { mutableStateOf(true) }
+ var resolution by rememberSaveable { mutableIntStateOf(0) }
+ var selectedFilter by rememberSaveable { mutableStateOf("Original") }
+ var autoCapture by rememberSaveable { mutableStateOf(false) }
+ var autoArmed by remember { mutableStateOf(true) }
+ var autoCrop by rememberSaveable { mutableStateOf(true) }
+ var volumeCapture by rememberSaveable { mutableStateOf(true) }
+ var capturePreview by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+ val scope = rememberCoroutineScope()
  var batch by rememberSaveable { mutableStateOf(false) }
  var idGuide by rememberSaveable { mutableStateOf(false) }
  var detectEnabled by rememberSaveable { mutableStateOf(true) }
@@ -76,6 +90,7 @@ internal fun NativeCameraScreen(
  var flashAvailable by remember { mutableStateOf(false) }
  var switchAvailable by remember { mutableStateOf(false) }
  var torch by remember { mutableStateOf(false) }
+ var flashMode by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
  var capturing by remember { mutableStateOf(false) }
  var retry by remember { mutableIntStateOf(0) }
  val active = remember { AtomicBoolean(true) }
@@ -99,7 +114,7 @@ internal fun NativeCameraScreen(
   owner.lifecycle.addObserver(observer)
   onDispose { active.set(false); controller.clearImageAnalysisAnalyzer(); analysisExecutor.shutdown(); owner.lifecycle.removeObserver(observer) }
  }
- DisposableEffect(granted, front, hd, retry) {
+ DisposableEffect(granted, front, resolution, retry) {
   var disposed = false
   outline = null; tracker = DetectionTracker()
   ready = false; error = ""; torch = false; flashAvailable = false; switchAvailable = false
@@ -119,8 +134,8 @@ internal fun NativeCameraScreen(
      else {
       switchAvailable = provider.hasCamera(if (front) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA)
       controller.cameraSelector = selector
-      controller.imageCaptureMode = if (hd) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-      controller.imageCaptureResolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(if (hd) ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY else ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build()
+      controller.imageCaptureMode = if (resolution == 0) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+      controller.imageCaptureResolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(listOf(Size(4032,3024),Size(3264,2488),Size(2880,2156),Size(1920,1440))[resolution], ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build()
       try {
        controller.setEnabledUseCases(CameraController.IMAGE_CAPTURE or CameraController.IMAGE_ANALYSIS)
        controller.setImageAnalysisAnalyzer(analysisExecutor,analyzer)
@@ -146,7 +161,8 @@ internal fun NativeCameraScreen(
  BackHandler { if (!capturing) { if (panel.isNotEmpty()) panel = "" else onClose() } }
  fun takePhoto() {
   if (!granted || !ready || capturing) return
-  capturing = true; error = ""
+  capturing = true; error = ""; panel = ""; autoArmed = false
+  controller.imageCaptureFlashMode = flashMode
   val finish = !batch || retaking
   var output: File? = null
   try {
@@ -157,14 +173,34 @@ internal fun NativeCameraScreen(
     override fun onImageSaved(result: ImageCapture.OutputFileResults) {
      if (!active.get()) { file.delete(); return }
      val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file).toString()
-     val shouldDetect = detectEnabled && detectionSupported
-     try { analysisExecutor.execute {
-      val detected = if (shouldDetect) runCatching {
-       val bitmap = DocumentStore(context).bitmap(Uri.parse(uri))
-       try { DocumentDetector.detect(bitmap) != null } finally { bitmap.recycle() }
-      }.getOrDefault(false) else false
-      executor.execute { if (active.get()) { capturing = false; latestCapture(uri, finish, detected) } else file.delete() }
-     } } catch (_: Exception) { file.delete(); capturing = false; error = "Could not process the photo. Please try again." }
+     val filter = selectedFilter
+     val shouldDetect = autoCrop && detectEnabled && detectionSupported
+     scope.launch {
+      try {
+       val result = withContext(Dispatchers.IO) {
+        val original = DocumentStore(context).bitmap(Uri.parse(uri))
+        try {
+         val detected = shouldDetect && DocumentDetector.detect(original) != null
+         val filtered = ScanFilters.apply(original,filter)
+         try {
+          file.outputStream().use { check(filtered.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,it)) }
+          val scale = minOf(1f,900f/maxOf(filtered.width,filtered.height))
+          val thumbnail = android.graphics.Bitmap.createScaledBitmap(filtered,(filtered.width*scale).toInt().coerceAtLeast(1),(filtered.height*scale).toInt().coerceAtLeast(1),true)
+          Triple(detected, if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
+         } finally { if(filtered!==original)filtered.recycle() }
+        } finally { original.recycle() }
+       }
+       capturePreview = result.second
+       delay(1100)
+       if(active.get()) {
+        capturePreview=null
+        capturing=false
+        latestCapture(result.third,finish,result.first)
+       }
+      } catch (_:Exception) {
+       file.delete();capturePreview=null;capturing=false;error="Could not process the photo. Please try again."
+      }
+     }
     }
     override fun onError(exception: ImageCaptureException) {
      file.delete()
@@ -173,19 +209,35 @@ internal fun NativeCameraScreen(
    })
   } catch (_: Exception) { output?.delete(); capturing = false; error = "Could not capture a photo. Please try again." }
  }
+ val latestTakePhoto by rememberUpdatedState(::takePhoto)
+ DisposableEffect(volumeCapture) {
+  val activity = context as? MainActivity
+  activity?.cameraVolumeAction = if(volumeCapture) ({ latestTakePhoto() }) else null
+  onDispose { activity?.cameraVolumeAction = null }
+ }
+ LaunchedEffect(outline != null, autoCapture, capturing, ready) {
+  if(outline == null && !capturing) autoArmed = true
+  if(autoCapture && autoArmed && outline != null && ready && !capturing && panel.isEmpty()) {
+   delay(1400)
+   if(outline != null && !capturing && panel.isEmpty())takePhoto()
+  }
+ }
  Column(Modifier.fillMaxSize().background(Color.Black)) {
-  Row(Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+  Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
    IconButton(onClick = onClose, enabled = !capturing) { WebIcon("close", color = Color.White, description = "Close camera") }
    if (pageCount > 0) TextButton(onClick = onClose, enabled = !capturing) { Text("$pageCount ✓", color = CameraAccent, fontSize = 13.sp) }
    Spacer(Modifier.weight(1f))
    IconButton(enabled = flashAvailable && ready && !capturing, onClick = {
-    val next = !torch
-    val future = controller.enableTorch(next)
-    future.addListener({ if (active.get()) try { future.get(); torch = next } catch (_: Exception) { message = "Flashlight is unavailable on this camera." } }, executor)
-   }) { WebIcon("flash", color = if (torch) CameraAccent else if (flashAvailable) Color.White else Color.Gray, description = "Flashlight") }
-   TextButton(enabled = !capturing, onClick = { panel = if (panel == "resolution") "" else "resolution" }) { Text(if (hd) "HD" else "STD", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
-   IconButton(enabled = !capturing, onClick = { panel = if (panel == "filters") "" else "filters" }) { WebIcon("layers", color = if (grayscale) CameraAccent else Color.White, description = "Camera filters") }
-   IconButton(enabled = !capturing, onClick = { panel = if (panel == "settings") "" else "settings" }) { WebIcon("settings", color = Color.White, description = "Camera settings") }
+    flashMode = when(flashMode) { ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON; ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_OFF; else -> ImageCapture.FLASH_MODE_AUTO }
+   }) {
+    Box {
+     WebIcon("flash", color = if (flashAvailable) Color.White else Color.Gray, description = "Flash ${when(flashMode){ImageCapture.FLASH_MODE_AUTO->"Auto";ImageCapture.FLASH_MODE_ON->"On";else->"Off"}}")
+     Text(when(flashMode){ImageCapture.FLASH_MODE_AUTO->"A";ImageCapture.FLASH_MODE_OFF->"×";else->""},Modifier.align(Alignment.BottomEnd),color=Color.White,fontSize=8.sp)
+    }
+   }
+   TextButton(enabled = !capturing, onClick = { panel = if (panel == "resolution") "" else "resolution" }) { Text(listOf("HD","L","STD","S")[resolution],Modifier.background(Color.White,RoundedCornerShape(2.dp)).padding(2.dp), color = Color.Black, fontSize = 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.ExtraBold) }
+   IconButton(enabled = !capturing, onClick = { panel = if (panel == "filters") "" else "filters" }) { CameraCirclesIcon() }
+   IconButton(enabled = !capturing, onClick = { panel = if (panel == "settings") "" else "settings" }) { WebIcon("more", color = Color.White, description = "Camera settings") }
   }
   Box(Modifier.fillMaxWidth().weight(1f).background(Color(0xFF111111))) {
    if (granted) AndroidView(factory = { preview }, modifier = Modifier.fillMaxSize())
@@ -210,39 +262,35 @@ internal fun NativeCameraScreen(
     Text(error, color = Color.White, textAlign = TextAlign.Center)
     TextButton(onClick = { retry++ }) { Text("Retry camera", color = CameraAccent) }
    } else if (!ready) CircularProgressIndicator(Modifier.align(Alignment.Center), color = CameraAccent)
-   if (capturing) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = CameraAccent) }
+   if(capturing) {
+    val transition=rememberInfiniteTransition(label="Scanning")
+    val position by transition.animateFloat(0f,1f,infiniteRepeatable(tween(850,easing=LinearEasing),RepeatMode.Reverse),label="Scan line")
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=.35f)),contentAlignment=Alignment.Center) {
+     capturePreview?.let { Image(it.asImageBitmap(),"Scanning captured image",Modifier.fillMaxSize(),contentScale=ContentScale.Fit) }
+     Canvas(Modifier.fillMaxSize()) {
+      val y=size.height*position
+      drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent,CameraAccent.copy(alpha=.3f))),topLeft=androidx.compose.ui.geometry.Offset(0f,(y-90).coerceAtLeast(0f)),size=androidx.compose.ui.geometry.Size(size.width,90f))
+      drawLine(CameraAccent,androidx.compose.ui.geometry.Offset(0f,y),androidx.compose.ui.geometry.Offset(size.width,y),3.dp.toPx())
+     }
+    }
+   }
    Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    if (ready) Text(if (capturing) "Saving photo…" else if (outline != null && detectEnabled) "Document detected · tap shutter" else if (idGuide) "ID framing guide · manual capture" else if (detectEnabled && detectionSupported) "Looking for document edges · tap to capture" else "Position your document · tap to focus", color = Color.White, fontSize = 11.sp)
+
     Row(Modifier.background(Color(0xDD181818), CircleShape).padding(3.dp)) {
      listOf(false to "Single", true to "Batch").forEach { (value, title) ->
       Text(title, Modifier.clip(CircleShape).background(if (batch == value) Color(0xFF555555) else Color.Transparent).clickable(enabled = !capturing && !retaking) { batch = value }.padding(horizontal = 18.dp, vertical = 10.dp), color = Color.White, fontSize = 13.sp)
      }
     }
    }
-   if (panel.isNotEmpty()) Surface(Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = Color(0xFF191919), shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)) {
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-     when (panel) {
-      "resolution" -> {
-       Text("Capture size", color = Color.White, fontWeight = FontWeight.Bold)
-       Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { listOf(true to "HD · Full size", false to "Standard · 1280px").forEach { (value, label) -> OutlinedButton(onClick = { hd = value; panel = "" }, border = BorderStroke(1.dp, if (hd == value) CameraAccent else Color.Gray)) { Text(label, color = if (hd == value) CameraAccent else Color.White, fontSize = 11.sp) } } }
-       Text("Camera capabilities determine the actual resolution.", color = Color.LightGray, fontSize = 11.sp)
-      }
-      "filters" -> {
-       Text("Camera filters", color = Color.White, fontWeight = FontWeight.Bold)
-       Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { listOf(false to "Original", true to "Grayscale").forEach { (value, label) -> OutlinedButton(onClick = { onFilter(value); panel = "" }, border = BorderStroke(1.dp, if (grayscale == value) CameraAccent else Color.Gray)) { Text(label, color = if (grayscale == value) CameraAccent else Color.White) } } }
-       Text("Filters apply in review and PDF. Live preview remains in color.", color = Color.LightGray, fontSize = 11.sp)
-      }
-      else -> {
-       Row(verticalAlignment = Alignment.CenterVertically) { Text("Detect document edges", Modifier.weight(1f), color = Color.White); Switch(checked = detectEnabled && detectionSupported, enabled = detectionSupported, onCheckedChange = { detectEnabled = it; outline = null; tracker = DetectionTracker() }, colors = SwitchDefaults.colors(checkedTrackColor = CameraAccent)) }
-       Row(verticalAlignment = Alignment.CenterVertically) { Text("Grid lines", Modifier.weight(1f), color = Color.White); Switch(checked = grid, onCheckedChange = { grid = it }, colors = SwitchDefaults.colors(checkedTrackColor = CameraAccent)) }
-       Text("Tap to capture · focus · pinch to zoom. Detected corners are suggestions; confirm them in Crop. Automatic shutter is not enabled.", color = Color.LightGray, fontSize = 12.sp, lineHeight = 18.sp)
-      }
-     }
-     TextButton(onClick = { panel = "" }, modifier = Modifier.align(Alignment.End)) { Text("Done", color = CameraAccent) }
-    }
+   if(panel=="filters")Box(Modifier.align(Alignment.TopCenter)){CameraFilterMenu(selectedFilter){selectedFilter=it;onFilter(false)}}
+   if(panel=="resolution")Box(Modifier.align(Alignment.TopCenter)){CameraResolutionMenu(resolution){resolution=it;panel=""}}
+   if(panel=="settings")Box(Modifier.align(Alignment.Center)) {
+    CameraSettingsMenu(autoCapture,grid,volumeCapture,autoCrop,
+     {autoCapture=it},{grid=it},{volumeCapture=it},{autoCrop=it},
+     {panel=""},{panel="";message="Tap to focus and pinch to zoom. Capture dimensions depend on the camera. Text orientation is not available yet."})
    }
   }
-  Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+  Column(Modifier.fillMaxWidth().heightIn(min = 210.dp).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
     listOf("Extract Text", "ID Cards", "Sign", "Scan", "To Word", "Question Set").forEach { mode ->
      val selected = (mode == "Scan" && !idGuide) || (mode == "ID Cards" && idGuide)
@@ -253,7 +301,7 @@ internal fun NativeCameraScreen(
     }
    }
    Row(Modifier.fillMaxWidth().padding(top = 22.dp, start = 14.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { IconButton(onClick = onImport, enabled = !capturing) { WebIcon("grid", Modifier.size(25.dp), Color.White, "Import images") } }
+    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { IconButton(onClick = onImport, enabled = !capturing) { CameraNineDots() } }
     Box(Modifier.weight(1.2f), contentAlignment = Alignment.Center) { Box(Modifier.size(68.dp).clip(CircleShape).border(3.dp, if (ready) CameraAccent else Color.Gray, CircleShape).padding(6.dp).clip(CircleShape).background(if (ready) Color.White else Color.DarkGray).clickable(enabled = ready && !capturing, onClick = ::takePhoto).semantics { contentDescription = "Capture document" }) }
     Box(Modifier.weight(0.55f), contentAlignment = Alignment.Center) { IconButton(onClick = onImport, enabled = !capturing) { WebIcon("images", Modifier.size(24.dp), Color.White, "Open gallery") } }
     Box(Modifier.weight(0.55f), contentAlignment = Alignment.Center) { IconButton(onClick = { front = !front }, enabled = switchAvailable && !capturing && granted) { WebIcon("switch", Modifier.size(26.dp), if (switchAvailable) Color.White else Color.Gray, "Switch camera") } }
