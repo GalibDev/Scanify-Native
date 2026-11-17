@@ -26,6 +26,23 @@ class StoreSmokeRunner : Instrumentation() {
     bitmap.recycle()
    }
    val store = DocumentStore(isolated)
+   val sourceBytes=image.readBytes()
+   val stagedImages=store.stageImages(listOf(Uri.fromFile(image),Uri.fromFile(image)))
+   check(stagedImages.size==2 && stagedImages.distinct().size==2)
+   check(image.readBytes().contentEquals(sourceBytes)) { "Import changed the original photo" }
+   stagedImages.forEach { uri -> store.bitmap(Uri.parse(uri)).recycle() }
+   val importDirectory=File(targetContext.cacheDir,"camera")
+   val importsBefore=importDirectory.listFiles()!!.count{it.name.startsWith("import-")}
+   check(runCatching{store.stageImages(listOf(Uri.fromFile(image),Uri.fromFile(File(root,"missing-import.png"))))}.isFailure)
+   check(importDirectory.listFiles()!!.count{it.name.startsWith("import-")}==importsBefore) { "Failed import leaked staged photos" }
+   val filterDoc=store.create(stagedImages.map(Uri::parse),"Import filter test",0,false,adjustments=listOf(PageAdjustment(filter="Invert"),PageAdjustment()))
+   val filterPreview=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(filterDoc).parentFile,"${filterDoc.id}-0.jpg").absolutePath))
+   val untouchedPreview=checkNotNull(android.graphics.BitmapFactory.decodeFile(File(store.file(filterDoc).parentFile,"${filterDoc.id}-1.jpg").absolutePath))
+   check(Color.green(filterPreview.getPixel(30,30))>240 && Color.blue(filterPreview.getPixel(30,30))>240 && Color.red(filterPreview.getPixel(30,30))<10) { "Selected import filter was not saved" }
+   check(Color.red(untouchedPreview.getPixel(30,30))>240 && Color.green(untouchedPreview.getPixel(30,30))<10) { "Filter leaked to another imported page" }
+   filterPreview.recycle();untouchedPreview.recycle()
+   store.delete(filterDoc)
+   stagedImages.forEach{File(importDirectory,Uri.parse(it).lastPathSegment!!).delete()}
    val filterSource = Bitmap.createBitmap(48,32,Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(80,120,160)) }
    ScanFilters.names.filter { it != "Remove Handwriting" }.forEach { filter ->
     val filtered = ScanFilters.apply(filterSource,filter)

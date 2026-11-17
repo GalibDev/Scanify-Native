@@ -11,7 +11,7 @@ import java.util.UUID
 import androidx.exifinterface.media.ExifInterface
 
 data class ScanDocument(val id: String, val name: String, val pages: Int, val created: Long)
-data class PageAdjustment(val rotation:Int=0,val grayscale:Boolean=false):java.io.Serializable
+data class PageAdjustment(val rotation:Int=0,val grayscale:Boolean=false,val filter:String="Original"):java.io.Serializable
 
 class DocumentStore(private val context: Context) {
  private val root = File(context.filesDir, "documents").apply { mkdirs() }
@@ -30,6 +30,26 @@ class DocumentStore(private val context: Context) {
   check(temp.renameTo(index)) { "Could not update document library" }
  }
  fun file(doc: ScanDocument) = File(root, "${doc.id}.pdf")
+ fun stageImages(uris: List<Uri>): List<String> {
+  require(uris.isNotEmpty())
+  val directory = File(context.cacheDir,"camera").apply { check(isDirectory || mkdirs()) }
+  val staged = mutableListOf<File>()
+  try {
+   return uris.map { uri ->
+    val destination = File.createTempFile("import-",".img",directory)
+    staged.add(destination)
+    context.contentResolver.openInputStream(uri)?.use { input ->
+     destination.outputStream().use { input.copyTo(it) }
+    } ?: error("Photo is no longer accessible")
+    val copiedUri = androidx.core.content.FileProvider.getUriForFile(context,"${context.packageName}.files",destination)
+    bitmap(copiedUri).recycle()
+    copiedUri.toString()
+   }
+  } catch(error:Exception) {
+   staged.forEach { it.delete() }
+   throw error
+  }
+ }
  fun rename(doc: ScanDocument, name: String) { require(name.isNotBlank()); write(list().map { if (it.id == doc.id) it.copy(name = name.trim()) else it }) }
  fun delete(doc: ScanDocument) { write(list().filterNot { it.id == doc.id }); file(doc).delete(); (0 until doc.pages).forEach { File(root, "${doc.id}-$it.jpg").delete() } }
  fun bitmap(uri: Uri): Bitmap = context.contentResolver.openInputStream(uri).use { input ->
@@ -78,7 +98,7 @@ class DocumentStore(private val context: Context) {
  private fun removeFiles(doc:ScanDocument) { file(doc).delete();(0 until doc.pages).forEach{File(root,"${doc.id}-$it.jpg").delete()} }
  fun create(uris: List<Uri>, name: String, rotation: Int, grayscale: Boolean, publish:Boolean=true,adjustments:List<PageAdjustment> = List(uris.size){PageAdjustment(rotation,grayscale)}): ScanDocument {
   require(uris.isNotEmpty())
-  require(adjustments.size==uris.size && adjustments.all{it.rotation in listOf(0,90,180,270)})
+  require(adjustments.size==uris.size && adjustments.all{it.rotation in listOf(0,90,180,270) && it.filter in ScanFilters.names && it.filter!="Remove Handwriting"})
   val doc = ScanDocument(UUID.randomUUID().toString(), name.trim().ifEmpty { "Scan" }, uris.size, System.currentTimeMillis())
   val target = file(doc)
   try {
@@ -88,7 +108,8 @@ class DocumentStore(private val context: Context) {
      val rotation=adjustments[i].rotation
      val grayscale=adjustments[i].grayscale
      val original = bitmap(uri)
-     val image = if (rotation == 0) original else Bitmap.createBitmap(original, 0, 0, original.width, original.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+     val filtered = try { ScanFilters.apply(original,adjustments[i].filter) } catch(error:Exception) { original.recycle();throw error }
+     val image = if (rotation == 0) filtered else Bitmap.createBitmap(filtered, 0, 0, filtered.width, filtered.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
      val page = pdf.startPage(PdfDocument.PageInfo.Builder(595, 842, i + 1).create())
      page.canvas.drawColor(Color.WHITE)
      val scale = minOf(555f / image.width, 802f / image.height)
@@ -100,7 +121,8 @@ class DocumentStore(private val context: Context) {
      val preview = if (grayscale) Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888).also { Canvas(it).drawBitmap(image, 0f, 0f, paint) } else image
      File(root, "${doc.id}-$i.jpg").outputStream().use { preview.compress(Bitmap.CompressFormat.JPEG, 92, it) }
      if (preview !== image) preview.recycle()
-     if (image !== original) image.recycle()
+     if (image !== filtered) image.recycle()
+     if (filtered !== original) filtered.recycle()
      original.recycle()
     }
     target.outputStream().use { pdf.writeTo(it) }

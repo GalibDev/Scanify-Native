@@ -71,12 +71,13 @@ class MainActivity : ComponentActivity() {
   var draft by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
   var cameraOpen by rememberSaveable { mutableStateOf(false) }
+  var importOpen by rememberSaveable { mutableStateOf(false) }
   var cropIndex by rememberSaveable { mutableIntStateOf(-1) }
   var reviewPage by rememberSaveable { mutableIntStateOf(0) }
-  DisposableEffect(cameraOpen, cropIndex) {
+  DisposableEffect(cameraOpen, cropIndex, importOpen) {
    val bars = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-   bars.isAppearanceLightStatusBars = !cameraOpen && cropIndex < 0
-   bars.isAppearanceLightNavigationBars = !cameraOpen && cropIndex < 0
+   bars.isAppearanceLightStatusBars = importOpen || (!cameraOpen && cropIndex < 0)
+   bars.isAppearanceLightNavigationBars = importOpen || (!cameraOpen && cropIndex < 0)
    onDispose { }
   }
   var exportId by rememberSaveable { mutableStateOf("") }
@@ -108,14 +109,19 @@ class MainActivity : ComponentActivity() {
   suspend fun refresh() { documents = withContext(Dispatchers.IO) { store.list() } }
   LaunchedEffect(Unit) { try { refresh() } catch (_: Exception) { notice("Could not read the document library.") } }
 
-  val images = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-   if (uris.isNotEmpty()) {
-    uris.forEach { try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { } }
-    val imported = uris.map(Uri::toString)
-    reviewPage=if(retakeIndex in draft.indices)retakeIndex else draft.size
-    adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment() else value}+List(imported.size-1){PageAdjustment()}) else ArrayList(adjustments+List(imported.size){PageAdjustment()})
-    draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) imported.first() else value } + imported.drop(1)) else ArrayList(draft + imported)
-    cameraOpen = false; retakeIndex = -1
+  fun acceptImages(uris: List<Uri>) {
+   if (uris.isEmpty() || busy) return
+   busy=true
+   scope.launch {
+    try {
+     val imported=withContext(Dispatchers.IO) { store.stageImages(uris) }
+     reviewPage=if(retakeIndex in draft.indices)retakeIndex else draft.size
+     adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment() else value}+List(imported.size-1){PageAdjustment()}) else ArrayList(adjustments+List(imported.size){PageAdjustment()})
+     draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) imported.first() else value } + imported.drop(1)) else ArrayList(draft + imported)
+     cameraOpen=false;retakeIndex=-1;importOpen=false
+    } catch(_:Exception) {
+     notice("Could not import a photo. Check photo access and try again.")
+    } finally { busy=false }
    }
   }
   val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
@@ -197,7 +203,7 @@ class MainActivity : ComponentActivity() {
   val selected = documents.find { it.id == selectedId }
   val shareDoc = documents.find { it.id == shareId }
   val actionDoc = documents.find { it.id == actionId } ?: selected
-  BackHandler(enabled = !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
+  BackHandler(enabled = !importOpen && !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
    when { draft.isNotEmpty() -> discard = true; selected != null -> selectedId = ""; else -> tab = "Home" }
   }
   fun saveScan() {
@@ -228,7 +234,7 @@ class MainActivity : ComponentActivity() {
     try {
      val pages=withContext(Dispatchers.IO){store.pageSources(doc)}
      draft=ArrayList(pages);adjustments=ArrayList(List(pages.size){PageAdjustment()});editingId=doc.id;name=doc.name;grayscale=false;reviewPage=0;retakeIndex=-1
-     if(source=="camera")capture() else if(source=="images")images.launch(arrayOf("image/*"))
+     if(source=="camera")capture() else if(source=="images")run { importOpen=true }
     } catch(_:Exception){notice("Could not open pages for editing. The saved document is unchanged.")}
     finally{busy=false}
    }
@@ -237,11 +243,12 @@ class MainActivity : ComponentActivity() {
    containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
-    if (!cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
+    if (!importOpen && !cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    if (cropIndex in draft.indices) CropScreen(store, draft[cropIndex],
+    if(importOpen) ImageImportScreen(onClose={if(!busy)importOpen=false},onImport=::acceptImages)
+    else if (cropIndex in draft.indices) CropScreen(store, draft[cropIndex],
      onCancel = { cropIndex = -1 }, onApply = { result ->
       draft = ArrayList(draft.mapIndexed { index, value -> if (index == cropIndex) result else value })
       cropIndex = -1
@@ -255,24 +262,24 @@ class MainActivity : ComponentActivity() {
       retakeIndex = -1
       if (finish) { cameraOpen = false; reviewPage = capturedIndex; if(detected) cropIndex = capturedIndex }
      },
-     onClose = { cameraOpen = false; retakeIndex = -1 }, onImport = { images.launch(arrayOf("image/*")) }
+     onClose = { cameraOpen = false; retakeIndex = -1 }, onImport = { run { importOpen=true } }
     ) else if (draft.isNotEmpty()) ScanReviewScreen(
-     store, draft, name, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.rotation, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.grayscale, busy,
+     store, draft, name, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.rotation, adjustments.getOrElse(reviewPage.coerceIn(0,draft.lastIndex)){PageAdjustment()}.let { if(it.grayscale) "Grayscale" else it.filter }, busy,
      onName = { name = it }, onBack = { discard = true },
      onRemove = { index -> draft = ArrayList(draft.filterIndexed { i, _ -> i != index });adjustments=ArrayList(adjustments.filterIndexed{i,_->i!=index}) },
      onRetake = { index -> retakeIndex = index; capture() },
      onRotate = { val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(rotation=(value.rotation+270)%360)else value}) },
-     onFilter = { gray -> val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(grayscale=gray)else value}) },
-     onImport = { images.launch(arrayOf("image/*")) }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
+     onFilter = { filter -> val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(grayscale=false,filter=filter)else value}) },
+     onImport = { run { importOpen=true } }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
      editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);val edits=ArrayList(adjustments);edits.add(to,edits.removeAt(from));draft=reordered;adjustments=edits;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameDocument(selected) }, onMore = { morePage=it },
      onShare = { share(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
     ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
-     DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={images.launch(arrayOf("image/*"))},
+     DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={run { importOpen=true }},
       onOpen={selectedId=it.id},onMore=::openDocumentMore,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
-    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { images.launch(arrayOf("image/*")) }) } else
+    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { run { importOpen=true } }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
       WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
@@ -288,7 +295,7 @@ class MainActivity : ComponentActivity() {
         item { WebTools { tool ->
          when (tool) {
           "Smart Scan" -> capture()
-          "Import Images" -> images.launch(arrayOf("image/*"))
+          "Import Images" -> run { importOpen=true }
           "PDF Tools", "All Tools" -> tab = "Tools"
           else -> unavailable = tool
          }
@@ -297,7 +304,7 @@ class MainActivity : ComponentActivity() {
        }
        val visible = documents.filter { it.name.contains(search, ignoreCase = true) }
        item { WebSection(if (search.isNotBlank()) "Search Results" else "Recent Documents", "View All", { tab = "Documents" }, visible.size) }
-       if (visible.isEmpty()) item { WebEmpty({ images.launch(arrayOf("image/*")) }, search.isNotBlank()) }
+       if (visible.isEmpty()) item { WebEmpty({ run { importOpen=true } }, search.isNotBlank()) }
        items(if (tab == "Home" && search.isBlank()) visible.take(3) else visible, key = { it.id }) { doc ->
         DocumentLibraryCard(doc,store.file(doc),onOpen={selectedId=doc.id},onMore={openDocumentMore(doc)})
        }
