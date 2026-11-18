@@ -10,7 +10,7 @@ import java.io.File
 import java.util.UUID
 import androidx.exifinterface.media.ExifInterface
 
-data class ScanDocument(val id: String, val name: String, val pages: Int, val created: Long)
+data class ScanDocument(val id: String, val name: String, val pages: Int, val created: Long, val importedPdf: Boolean = false)
 data class PageAdjustment(val rotation:Int=0,val grayscale:Boolean=false,val filter:String="Original"):java.io.Serializable
 
 class DocumentStore(private val context: Context) {
@@ -20,16 +20,40 @@ class DocumentStore(private val context: Context) {
   if (!index.exists()) return emptyList()
   val data = JSONArray(index.readText())
   return (0 until data.length()).map { data.getJSONObject(it).let { row ->
-   ScanDocument(row.getString("id"), row.getString("name"), row.getInt("pages"), row.getLong("created"))
+   ScanDocument(row.getString("id"), row.getString("name"), row.getInt("pages"), row.getLong("created"), row.optBoolean("importedPdf", false))
   } }.sortedByDescending { it.created }
  }
  private fun write(documents: List<ScanDocument>) {
   val array = JSONArray()
-  documents.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name).put("pages", it.pages).put("created", it.created)) }
+  documents.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name).put("pages", it.pages).put("created", it.created).put("importedPdf", it.importedPdf)) }
   val temp = File(root, "index.tmp").apply { writeText(array.toString()) }
   check(temp.renameTo(index)) { "Could not update document library" }
  }
  fun file(doc: ScanDocument) = File(root, "${doc.id}.pdf")
+ // Publish the batch only after all original PDFs validate successfully.
+ fun importPdfs(uris: List<Uri>): List<ScanDocument> {
+  require(uris.isNotEmpty())
+  val staged = mutableListOf<ScanDocument>()
+  val files = mutableListOf<File>()
+  try {
+   uris.forEach { uri ->
+    var title = "Imported document"
+    runCatching { context.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) title=it.getString(0) ?: title } }
+    if(uri.scheme=="file") title=File(requireNotNull(uri.path)).name
+    val id=UUID.randomUUID().toString()
+    val target=File(root,"$id.pdf");files.add(target)
+    context.contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } } ?: error("File is no longer accessible")
+    val count=android.graphics.pdf.PdfRenderer(android.os.ParcelFileDescriptor.open(target,android.os.ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+     require(renderer.pageCount>0)
+     repeat(renderer.pageCount) { index -> renderer.openPage(index).use { require(it.width>0 && it.height>0) } }
+     renderer.pageCount
+    }
+    staged.add(ScanDocument(id,title.removeSuffix(".pdf").removeSuffix(".PDF"),count,System.currentTimeMillis(),true))
+   }
+   write(list()+staged)
+   return staged
+  } catch(error:Exception) { files.forEach{it.delete()};throw error }
+ }
  fun stageImages(uris: List<Uri>): List<String> {
   require(uris.isNotEmpty())
   val directory = File(context.cacheDir,"camera").apply { check(isDirectory || mkdirs()) }

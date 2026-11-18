@@ -36,7 +36,7 @@ private val catalog = listOf(
   CatalogTool("photo translation","translate","blue"), CatalogTool("Book","book","cyan"), CatalogTool("PPT","ppt","orange"), CatalogTool("Whiteboard","board","cyan"),
   CatalogTool("Timestamp","timestamp","blue"), CatalogTool("Mega Scan","mega","mint"), CatalogTool("Smart Scan","scan","mint",action="scan")
  )),
- CatalogSection("Import","images",listOf(CatalogTool("Import Images","images","mint",action="import"), CatalogTool("Import Files","folder","blue"))),
+ CatalogSection("Import","images",listOf(CatalogTool("Import Images","images","mint",action="import"), CatalogTool("Import Files","folder","blue",action="files"))),
  CatalogSection("PDF Tools","file",listOf(CatalogTool("Merge PDF","layers"),CatalogTool("Split PDF","columns"),CatalogTool("Compress PDF","download"),CatalogTool("Organize Pages","rotate"))),
  CatalogSection("Convert","switch",listOf(CatalogTool("To Word","file","blue","W"),CatalogTool("To Excel","file","mint","X"),CatalogTool("To PPT","board","orange","P"),CatalogTool("PDF to Images","images","blue"),CatalogTool("Images to PDF","images","blue",action="import"))),
  CatalogSection("Edit & Secure","edit",listOf(CatalogTool("Sign","sign","blue"),CatalogTool("Watermark PDF","stamp"),CatalogTool("Lock","lock","orange"),CatalogTool("Erase Marks","erase"),CatalogTool("Annotate PDF","edit"))),
@@ -44,7 +44,7 @@ private val catalog = listOf(
 )
 
 @Composable
-internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Unit) {
+internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Unit,onFiles:()->Unit) {
  var category by rememberSaveable { mutableStateOf("") }
  var searching by rememberSaveable { mutableStateOf(false) }
  var query by rememberSaveable { mutableStateOf("") }
@@ -89,7 +89,7 @@ internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Uni
    item { Text("Search Results",fontSize=20.sp,fontWeight=FontWeight.Bold,color=WebText) }
    val results=catalog.flatMap{it.tools}.filter{it.label.contains(search,ignoreCase=true)}
    if(results.isEmpty())item { Text("No matching tools.",Modifier.fillMaxWidth().padding(28.dp),textAlign=TextAlign.Center,color=WebMuted,fontSize=13.sp) }
-   else item { CatalogGrid(results,onScan,onImport) }
+   else item { CatalogGrid(results,onScan,onImport,onFiles) }
   } else catalog.filter{category.isEmpty()||it.title==category}.forEach { section ->
    item {
     Column(Modifier.padding(bottom=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -98,7 +98,7 @@ internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Uni
       Text(section.title,Modifier.weight(1f),fontSize=19.sp,fontWeight=FontWeight.Normal,color=WebText,letterSpacing=(-.5).sp)
       if(category.isEmpty())TextButton(onClick={category=section.title},modifier=Modifier.height(30.dp),contentPadding=PaddingValues(0.dp)) { Text("See All",fontSize=12.sp);Spacer(Modifier.width(5.dp));WebIcon("arrow",Modifier.size(16.dp)) }
      }
-     CatalogGrid(if(category.isEmpty())section.tools.take(if(section.title=="Scan") 10 else 4) else section.tools,onScan,onImport)
+     CatalogGrid(if(category.isEmpty())section.tools.take(if(section.title=="Scan") 10 else 4) else section.tools,onScan,onImport,onFiles)
     }
    }
   }
@@ -106,7 +106,7 @@ internal fun ToolsCatalogScreen(onBack:()->Unit,onScan:()->Unit,onImport:()->Uni
 }
 
 @Composable
-private fun CatalogGrid(tools:List<CatalogTool>,onScan:()->Unit,onImport:()->Unit) {
+private fun CatalogGrid(tools:List<CatalogTool>,onScan:()->Unit,onImport:()->Unit,onFiles:()->Unit) {
  Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
   tools.chunked(4).forEach { row ->
    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -121,7 +121,7 @@ private fun CatalogGrid(tools:List<CatalogTool>,onScan:()->Unit,onImport:()->Uni
      Column(
       Modifier.weight(1f).heightIn(min = 99.dp)
        .clickable(enabled = tool.action.isNotEmpty()) {
-        when (tool.action) { "scan" -> onScan(); "import" -> onImport() }
+        when (tool.action) { "scan" -> onScan(); "import" -> onImport(); "files" -> onFiles() }
        }.padding(horizontal = 2.dp, vertical = 5.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(6.dp)

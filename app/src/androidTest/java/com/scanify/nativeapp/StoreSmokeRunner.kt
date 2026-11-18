@@ -60,6 +60,17 @@ class StoreSmokeRunner : Instrumentation() {
    check(store.list().isEmpty())
    val doc = store.create(listOf(Uri.fromFile(image), Uri.fromFile(image)), "Test scan", 90, true)
    check(doc.pages == 2 && store.file(doc).length() > 0)
+   val originalPdf=store.file(doc).readBytes()
+   val importedPdfs=store.importPdfs(listOf(Uri.fromFile(store.file(doc)),Uri.fromFile(store.file(doc))))
+   check(importedPdfs.size==2 && importedPdfs.all { it.pages==2 && it.importedPdf })
+   importedPdfs.forEach { check(store.file(it).readBytes().contentEquals(originalPdf)) { "Import rewrote original PDF bytes" } }
+   check(DocumentStore(isolated).list().filter{it.id in importedPdfs.map{d->d.id}}.all{it.importedPdf})
+   val filesBefore=File(root,"documents").list()!!.toSet()
+   val libraryBefore=store.list()
+   check(runCatching{store.importPdfs(listOf(Uri.fromFile(store.file(doc)),Uri.fromFile(image)))}.isFailure)
+   check(store.list()==libraryBefore && File(root,"documents").list()!!.toSet()==filesBefore) { "Failed PDF batch changed library or leaked files" }
+   importedPdfs.forEach{store.delete(it)}
+   check(store.file(doc).readBytes().contentEquals(originalPdf))
    val exported=DocumentImageExport.render(store.file(doc),root,"Test / export")
    check(exported.size==2 && exported.map{it.name}.distinct().size==2)
    exported.forEach { file ->

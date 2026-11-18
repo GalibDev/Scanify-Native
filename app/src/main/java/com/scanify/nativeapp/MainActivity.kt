@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
   var draft by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
   var cameraOpen by rememberSaveable { mutableStateOf(false) }
+  var filesOpen by rememberSaveable { mutableStateOf(false) }
   var importOpen by rememberSaveable { mutableStateOf(false) }
   var cropIndex by rememberSaveable { mutableIntStateOf(-1) }
   var reviewPage by rememberSaveable { mutableIntStateOf(0) }
@@ -203,7 +204,7 @@ class MainActivity : ComponentActivity() {
   val selected = documents.find { it.id == selectedId }
   val shareDoc = documents.find { it.id == shareId }
   val actionDoc = documents.find { it.id == actionId } ?: selected
-  BackHandler(enabled = !importOpen && !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
+  BackHandler(enabled = !filesOpen && !importOpen && !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
    when { draft.isNotEmpty() -> discard = true; selected != null -> selectedId = ""; else -> tab = "Home" }
   }
   fun saveScan() {
@@ -243,11 +244,18 @@ class MainActivity : ComponentActivity() {
    containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
-    if (!importOpen && !cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
+    if (!filesOpen && !importOpen && !cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    if(importOpen) ImageImportScreen(onClose={if(!busy)importOpen=false},onImport=::acceptImages)
+    if(filesOpen) FileImportScreen(onClose={if(!busy)filesOpen=false},onImport={uris ->
+     if(!busy && uris.isNotEmpty()) { busy=true;scope.launch {
+      try { val imported=withContext(Dispatchers.IO){store.importPdfs(uris)};refresh();selectedId=imported.first().id;filesOpen=false;notice("Saved to: All · "+imported.size+" PDF(s)") }
+      catch(_:Exception){notice("Could not import PDF. Check file access and choose an undamaged PDF without a password. Nothing was imported.")}
+      finally {busy=false}
+     }}
+    })
+    else if(importOpen) ImageImportScreen(onClose={if(!busy)importOpen=false},onImport=::acceptImages)
     else if (cropIndex in draft.indices) CropScreen(store, draft[cropIndex],
      onCancel = { cropIndex = -1 }, onApply = { result ->
       draft = ArrayList(draft.mapIndexed { index, value -> if (index == cropIndex) result else value })
@@ -277,9 +285,9 @@ class MainActivity : ComponentActivity() {
      onRename = { renameDocument(selected) }, onMore = { morePage=it },
      onShare = { share(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
     ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
-     DocumentsScreen(store,documents,onProfile={tab="Settings"},onImport={run { importOpen=true }},
+     DocumentsScreen(store,documents,onProfile={tab="Settings"},onFiles={filesOpen=true},onImport={run { importOpen=true }},
       onOpen={selectedId=it.id},onMore=::openDocumentMore,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
-    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onBack = { tab = "Home" }, onScan = ::capture, onImport = { run { importOpen=true } }) } else
+    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onFiles={filesOpen=true},onBack = { tab = "Home" }, onScan = ::capture, onImport = { run { importOpen=true } }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
       WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
@@ -296,6 +304,7 @@ class MainActivity : ComponentActivity() {
          when (tool) {
           "Smart Scan" -> capture()
           "Import Images" -> run { importOpen=true }
+          "Import Files" -> run { filesOpen=true }
           "PDF Tools", "All Tools" -> tab = "Tools"
           else -> unavailable = tool
          }

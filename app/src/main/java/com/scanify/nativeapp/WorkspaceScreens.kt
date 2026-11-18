@@ -61,7 +61,7 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
    val sourcePreview = File(file.parentFile, "${doc.id}-$page.jpg")
    if (sourcePreview.exists()) BitmapFactory.decodeFile(sourcePreview.absolutePath) ?: error("Cannot decode preview") else
    PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
-    renderer.openPage(page).use { pdf -> Bitmap.createBitmap(850, 1202, Bitmap.Config.ARGB_8888).also { image -> image.eraseColor(android.graphics.Color.WHITE); pdf.render(image, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } }
+    renderer.openPage(page).use { pdf -> Bitmap.createBitmap((pdf.width * (1600f/maxOf(pdf.width,pdf.height))).toInt().coerceAtLeast(1), (pdf.height * (1600f/maxOf(pdf.width,pdf.height))).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { image -> image.eraseColor(android.graphics.Color.WHITE); pdf.render(image, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } }
    }
   }.getOrElse { renderError = true; null } }
  }
@@ -75,7 +75,25 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
    IconButton(onClick = { onMore(page) }, modifier = Modifier.size(34.dp)) { WebIcon("more", Modifier.size(23.dp), Color(0xFF292929), "More document actions") }
   }
   Box(Modifier.fillMaxWidth().weight(1f)) {
-   Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+   if(doc.importedPdf) {
+    Box(Modifier.fillMaxSize().padding(bottom=76.dp),contentAlignment=Alignment.Center) {
+     val image=bitmap
+     if(image!=null) Image(image.asImageBitmap(),"PDF page "+(page+1),Modifier.fillMaxSize(),contentScale=ContentScale.Fit)
+     else Text(if(renderError)"Preview unavailable" else "Loading page…",color=WebMuted)
+     Text((page+1).toString()+"/"+doc.pages,Modifier.align(Alignment.TopStart).padding(14.dp).background(Color.Gray,RoundedCornerShape(4.dp)).padding(5.dp),color=Color.White,fontSize=12.sp)
+     if(doc.pages>1)Row(Modifier.align(Alignment.BottomCenter).background(Color.White,RoundedCornerShape(8.dp)),verticalAlignment=Alignment.CenterVertically) {
+      IconButton(onClick={page--},enabled=page>0){WebIcon("left",Modifier.size(20.dp),Color.Black,"Previous PDF page")}
+      Text((page+1).toString()+" / "+doc.pages)
+      IconButton(onClick={page++},enabled=page+1<doc.pages){WebIcon("right",Modifier.size(20.dp),Color.Black,"Next PDF page")}
+     }
+    }
+    if(grid) LazyRow(Modifier.align(Alignment.TopCenter).padding(top=48.dp).background(Color.White),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+     items((0 until doc.pages).toList()) { index -> FilterChip(selected=page==index,onClick={page=index;grid=false},label={Text("Page "+(index+1))}) }
+    }
+    Surface(onClick={onUnavailable("AI document rewriting")},modifier=Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),shape=RoundedCornerShape(7.dp),color=Color.White,border=BorderStroke(1.5.dp,Color(0xFF13B4A4))) {
+     Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically) { Text("✦ Help me rewrite the document",Modifier.weight(1f),color=Color(0xFF13B4A4),fontSize=14.sp);WebIcon("arrow",Modifier.size(22.dp),Color(0xFF13B4A4)) }
+    }
+   } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
     if (grid) LazyRow(Modifier.fillMaxWidth().background(Color.White).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
      items((0 until doc.pages).toList()) { index -> FilterChip(selected = page == index, onClick = { page = index; grid = false }, label = { Text("Page ${index + 1}") }) }
     }
@@ -99,20 +117,20 @@ internal fun DocumentReaderScreen(doc: ScanDocument, file: File, onBack: () -> U
      Text("  Add Page", fontSize = 16.sp, color = Color(0xFF666666))
     }
    }
-   Surface(onClick = { onUnavailable("AI assistance") }, modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(43.dp), shape = CircleShape, color = Color.White, border = BorderStroke(1.5.dp, Color(0xFF13B4A4))) {
+   if(!doc.importedPdf) Surface(onClick = { onUnavailable("AI assistance") }, modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(43.dp), shape = CircleShape, color = Color.White, border = BorderStroke(1.5.dp, Color(0xFF13B4A4))) {
     Box(contentAlignment = Alignment.Center) { Text("AI✦", color = Color(0xFF13B4A4), fontSize = 16.sp, fontWeight = FontWeight.Bold) }
    }
   }
   HorizontalDivider(color = Color(0xFFF0F0F0))
   Row(Modifier.fillMaxWidth().background(Color.White).height(74.dp).padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.Top) {
    ToolAction("camera", "Add", color = Color(0xFF292929),onClick=onAdd)
-   ToolAction("edit", "Edit", color = Color(0xFF292929),onClick=onEdit)
+   ToolAction(if(doc.importedPdf)"file" else "edit", if(doc.importedPdf)"Edit PDF" else "Edit", color = Color(0xFF292929),onClick=onEdit)
    ToolAction("share", "Share", color = Color(0xFF292929), onClick = onShare)
    Column(Modifier.widthIn(min = 48.dp).clickable { onUnavailable("To Word") }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text("Word", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF292929), modifier = Modifier.height(24.dp))
     Text("To Word", fontSize = 11.sp, color = Color(0xFF292929))
    }
-   ToolAction("sign", "Sign", color = Color(0xFF292929)) { onUnavailable("Signature") }
+   ToolAction(if(doc.importedPdf)"text" else "sign", if(doc.importedPdf)"Extract Text" else "Sign", color = Color(0xFF292929)) { onUnavailable(if(doc.importedPdf)"Extract Text" else "Signature") }
   }
  }
 

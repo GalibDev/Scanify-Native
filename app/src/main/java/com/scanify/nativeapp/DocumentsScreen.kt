@@ -34,7 +34,7 @@ import java.util.Locale
 
 @Composable
 internal fun DocumentsScreen(
- store:DocumentStore,documents:List<ScanDocument>,onProfile:()->Unit,onImport:()->Unit,
+ store:DocumentStore,documents:List<ScanDocument>,onProfile:()->Unit,onImport:()->Unit,onFiles:()->Unit,
  onOpen:(ScanDocument)->Unit,
  onMore:(ScanDocument)->Unit,onUnavailable:(String)->Unit,onNotifications:()->Unit
 ) {
@@ -93,7 +93,7 @@ internal fun DocumentsScreen(
     Text("Folders",fontSize=18.sp,fontWeight=FontWeight.SemiBold)
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
      listOf("Import Files" to "upload","Import Images" to "images","Create Folder" to "folder").forEach{(label,icon)->
-      Surface(onClick={if(label=="Import Images")onImport()else onUnavailable(if(label=="Import Files")"File import" else "Folders")},modifier=Modifier.weight(1f).heightIn(min=94.dp),shape=RoundedCornerShape(12.dp),color=Color.White,border=BorderStroke(1.dp,WebLine)) {
+      Surface(onClick={if(label=="Import Images")onImport()else if(label=="Import Files")onFiles() else onUnavailable("Folders")},modifier=Modifier.weight(1f).heightIn(min=94.dp),shape=RoundedCornerShape(12.dp),color=Color.White,border=BorderStroke(1.dp,WebLine)) {
        Column(Modifier.padding(9.dp),verticalArrangement=Arrangement.spacedBy(7.dp)) {
         Box(Modifier.size(34.dp).background(Color(0xFFF0E8FF),RoundedCornerShape(9.dp)),contentAlignment=Alignment.Center){WebIcon(icon,Modifier.size(21.dp))}
         Text(label,fontSize=11.sp,lineHeight=14.sp,fontWeight=FontWeight.SemiBold)
