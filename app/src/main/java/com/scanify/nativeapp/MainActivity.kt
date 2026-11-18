@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
   var draft by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
   var retakeIndex by rememberSaveable { mutableIntStateOf(-1) }
   var cameraOpen by rememberSaveable { mutableStateOf(false) }
+  var ocrOpen by rememberSaveable { mutableStateOf(false) }
   var filesOpen by rememberSaveable { mutableStateOf(false) }
   var importOpen by rememberSaveable { mutableStateOf(false) }
   var cropIndex by rememberSaveable { mutableIntStateOf(-1) }
@@ -204,7 +205,7 @@ class MainActivity : ComponentActivity() {
   val selected = documents.find { it.id == selectedId }
   val shareDoc = documents.find { it.id == shareId }
   val actionDoc = documents.find { it.id == actionId } ?: selected
-  BackHandler(enabled = !filesOpen && !importOpen && !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
+  BackHandler(enabled = !ocrOpen && !filesOpen && !importOpen && !busy && (draft.isNotEmpty() || selected != null || tab != "Home")) {
    when { draft.isNotEmpty() -> discard = true; selected != null -> selectedId = ""; else -> tab = "Home" }
   }
   fun saveScan() {
@@ -244,11 +245,14 @@ class MainActivity : ComponentActivity() {
    containerColor = if (cameraOpen || cropIndex >= 0) Color.Black else if (selected != null) Color.White else Background,
    snackbarHost = { SnackbarHost(snackbar) },
    bottomBar = {
-    if (!filesOpen && !importOpen && !cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
+    if (!ocrOpen && !filesOpen && !importOpen && !cameraOpen && draft.isEmpty() && selected == null) WebNavigation(tab, { tab = it }, ::capture)
    }
   ) { padding ->
    Box(Modifier.fillMaxSize().padding(padding)) {
-    if(filesOpen) FileImportScreen(onClose={if(!busy)filesOpen=false},onImport={uris ->
+    if(ocrOpen) OcrScreen(store=store,pdf=selected?.takeIf{draft.isEmpty()}?.let{store.file(it)},
+     image=draft.getOrNull(reviewPage),adjustment=adjustments.getOrElse(reviewPage){PageAdjustment()},
+     onClose={ocrOpen=false})
+    else if(filesOpen) FileImportScreen(onClose={if(!busy)filesOpen=false},onImport={uris ->
      if(!busy && uris.isNotEmpty()) { busy=true;scope.launch {
       try { val imported=withContext(Dispatchers.IO){store.importPdfs(uris)};refresh();selectedId=imported.first().id;filesOpen=false;notice("Saved to: All · "+imported.size+" PDF(s)") }
       catch(_:Exception){notice("Could not import PDF. Check file access and choose an undamaged PDF without a password. Nothing was imported.")}
@@ -278,16 +282,16 @@ class MainActivity : ComponentActivity() {
      onRetake = { index -> retakeIndex = index; capture() },
      onRotate = { val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(rotation=(value.rotation+270)%360)else value}) },
      onFilter = { filter -> val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(grayscale=false,filter=filter)else value}) },
-     onImport = { run { importOpen=true } }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
+     onImport = { run { importOpen=true } }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { if(it=="Extract Text")ocrOpen=true else unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
      editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);val edits=ArrayList(adjustments);edits.add(to,edits.removeAt(from));draft=reordered;adjustments=edits;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },
      onRename = { renameDocument(selected) }, onMore = { morePage=it },
-     onShare = { share(selected) }, onUnavailable = { unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
+     onShare = { share(selected) }, onUnavailable = { if(it=="Extract Text")ocrOpen=true else unavailable = it },onAdd={addPage=true},onEdit={editDocument(selected)}
     ) else if(tab == "Documents") documentsState.SaveableStateProvider("library") {
      DocumentsScreen(store,documents,onProfile={tab="Settings"},onFiles={filesOpen=true},onImport={run { importOpen=true }},
       onOpen={selectedId=it.id},onMore=::openDocumentMore,onUnavailable={unavailable=it},onNotifications={notice("No new notifications.")})
-    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onFiles={filesOpen=true},onBack = { tab = "Home" }, onScan = ::capture, onImport = { run { importOpen=true } }) } else
+    } else if(tab == "Tools") toolsState.SaveableStateProvider("catalog") { ToolsCatalogScreen(onOcr={ocrOpen=true},onFiles={filesOpen=true},onBack = { tab = "Home" }, onScan = ::capture, onImport = { run { importOpen=true } }) } else
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 15.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
      item {
       WebHeader({ tab = "Settings" }, { notice("No new notifications.") })
@@ -305,6 +309,7 @@ class MainActivity : ComponentActivity() {
           "Smart Scan" -> capture()
           "Import Images" -> run { importOpen=true }
           "Import Files" -> run { filesOpen=true }
+          "Extract Text" -> run { ocrOpen=true }
           "PDF Tools", "All Tools" -> tab = "Tools"
           else -> unavailable = tool
          }
@@ -328,6 +333,7 @@ class MainActivity : ComponentActivity() {
    val page=morePage
    morePage=-1
    when(action) {
+    "Extract Text" -> ocrOpen=true
     "Rename" -> renameDocument(selected)
     "Document Info" -> showDocumentInfo=true
     "Edit PDF", "Manage Pages" -> editDocument(selected)

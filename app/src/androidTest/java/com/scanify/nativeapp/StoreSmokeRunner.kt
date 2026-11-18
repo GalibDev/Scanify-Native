@@ -26,6 +26,25 @@ class StoreSmokeRunner : Instrumentation() {
     bitmap.recycle()
    }
    val store = DocumentStore(isolated)
+   val ocrBitmap=Bitmap.createBitmap(1000,400,Bitmap.Config.ARGB_8888).apply{eraseColor(Color.WHITE)}
+   val ocrCanvas=android.graphics.Canvas(ocrBitmap)
+   val ocrPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply{color=Color.BLACK;textSize=64f;typeface=android.graphics.Typeface.DEFAULT}
+   ocrCanvas.drawText("SCANIFY OCR TEST",40f,120f,ocrPaint)
+   ocrCanvas.drawText("Invoice 12345",40f,240f,ocrPaint)
+   val recognized=NativeOcr.recognize(ocrBitmap)
+   check(recognized.contains("SCANIFY",true) && recognized.contains("12345")) { "OCR did not recognize generated text: $recognized" }
+   val ocrSource=File(root,"ocr.png")
+   ocrSource.outputStream().use{ocrBitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+   ocrBitmap.eraseColor(Color.WHITE)
+   check(NativeOcr.recognize(ocrBitmap).isBlank()) { "Blank page produced OCR text" }
+   ocrBitmap.recycle()
+   val ocrDoc=store.create(listOf(Uri.fromFile(ocrSource),Uri.fromFile(ocrSource)),"OCR test",0,false)
+   val ocrPdfBytes=store.file(ocrDoc).readBytes()
+   val progress=mutableListOf<Int>()
+   val pdfText=kotlinx.coroutines.runBlocking { NativeOcr.pdf(store.file(ocrDoc)){page,total->check(total==2);progress.add(page)} }
+   check(progress==listOf(1,2) && pdfText.contains("Page 1") && pdfText.contains("Page 2") && pdfText.contains("12345")) { "Multipage PDF OCR failed: $pdfText" }
+   check(store.file(ocrDoc).readBytes().contentEquals(ocrPdfBytes)) { "OCR changed the source PDF" }
+   store.delete(ocrDoc)
    val sourceBytes=image.readBytes()
    val stagedImages=store.stageImages(listOf(Uri.fromFile(image),Uri.fromFile(image)))
    check(stagedImages.size==2 && stagedImages.distinct().size==2)

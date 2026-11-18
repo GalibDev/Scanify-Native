@@ -84,3 +84,11 @@ Tools, Home and Documents now open a native Recents browser for PDFs. Browse use
 PDF imports copy the original bytes into private storage, validate every page, and publish the entire batch atomically. A failed batch leaves the existing library unchanged and removes its staged files. Original names, page count, text and vector content are retained on import/export. Password-protected or damaged PDFs are rejected. Imports reopen in a centered, aspect-correct reader with a page badge, navigation and the reference toolbar. Word conversion, OCR, AI rewriting and folders remain unavailable. Editing/Add Page still uses the existing raster page editor and saving an edit replaces selectable text/vector content with page images.
 
 Import Files validation passed assembleDebug/lintDebug and on-device storage tests for byte-preserving two-PDF import, page counts, persisted import metadata and atomic failed-batch cleanup. Emulator checks passed Android Browse selection, Recents persistence, Open, centered landscape rendering and portrait page navigation. The dedicated QA document was deleted afterward; the seven existing library documents were retained.
+
+## OCR
+
+Extract Text is available from Home/Tools, the current scan review page, and a saved document's reader/More panel. Uses bundled ML Kit Latin text recognition 16.0.1 on-device, without a first-use model download. English/Latin script is supported; Bengali is not supported by this engine. Review OCR uses the selected rotation/filter. Saved PDFs are processed page by page at a bounded 2400-pixel edge with progress and cancellation between pages. Original images and PDFs are unchanged.
+
+The result is editable and can be copied, shared through Android's chooser, or exported as UTF-8 TXT. Empty recognition and file/model errors have explicit messages. OCR text is a temporary workspace and is not embedded as a searchable PDF text layer; export it to keep a copy. Accuracy varies with focus, resolution, orientation and document layout.
+
+OCR validation passed build/lint and Android tests for generated Latin text/digits, blank-page rejection, ordered two-page PDF recognition and unchanged source bytes. Emulator extraction produced both landscape and portrait page text; Save TXT output was read back and matched the result.
