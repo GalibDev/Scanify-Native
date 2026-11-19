@@ -5,7 +5,7 @@ import android.graphics.Color
 import kotlin.math.*
 
 internal object ScanFilters {
- val names = listOf("Original", "Omnifix", "No Shadow", "Remove Handwriting", "Lighten", "Magic Color", "Eco", "Grayscale", "B&W", "Invert")
+ val names = listOf("Original", "Enhance", "Omnifix", "No Shadow", "Remove Handwriting", "Lighten", "Magic Color", "Eco", "Grayscale", "B&W", "Invert")
  fun apply(image: Bitmap, filter: String): Bitmap {
   require(filter in names && filter != "Remove Handwriting")
   if (filter == "Original") return image
@@ -13,8 +13,13 @@ internal object ScanFilters {
   val height = image.height
   val pixels = IntArray(width * height)
   image.getPixels(pixels, 0, width, 0, 0, width, height)
-  if (filter == "Omnifix") {
+  if (filter == "Omnifix" || filter == "Enhance") {
    PaperEnhancement.apply(pixels,width,height)
+   if(filter=="Enhance") for(i in pixels.indices) {
+    val p=pixels[i]
+    fun enhance(v:Int)=(((v-190f)*1.25f)+220f).roundToInt().coerceIn(0,255)
+    pixels[i]=Color.rgb(enhance(Color.red(p)),enhance(Color.green(p)),enhance(Color.blue(p)))
+   }
    return Bitmap.createBitmap(pixels,width,height,Bitmap.Config.ARGB_8888)
   }
   val tile = max(12, (max(width, height) / 24f).roundToInt())

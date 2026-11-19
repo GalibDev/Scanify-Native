@@ -7,13 +7,13 @@ import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
 import kotlin.math.*
 
-/** On-device contour heuristic, not semantic recognition of paper. Never crops without confirmation. */
+/** On-device contour heuristic, not semantic recognition of paper. Capture can apply the detected quadrilateral when Auto Crop is enabled. */
 object DocumentDetector {
  val available: Boolean by lazy { runCatching { OpenCVLoader.initLocal() }.getOrDefault(false) }
 
  fun detect(bitmap: Bitmap): List<CropPoint>? {
   if (!available) return null
-  val scale = minOf(1f, 720f / max(bitmap.width, bitmap.height))
+  val scale = minOf(1f, 1200f / max(bitmap.width, bitmap.height))
   val small = if (scale < 1f) Bitmap.createScaledBitmap(bitmap,(bitmap.width*scale).roundToInt(),(bitmap.height*scale).roundToInt(),true) else bitmap
   val rgba=Mat();val gray=Mat()
   return try { Utils.bitmapToMat(small,rgba);Imgproc.cvtColor(rgba,gray,Imgproc.COLOR_RGBA2GRAY);detectGray(gray) }
@@ -40,7 +40,7 @@ object DocumentDetector {
      Imgproc.findContours(mask,contours,hierarchy,Imgproc.RETR_LIST,Imgproc.CHAIN_APPROX_SIMPLE)
      for (contour in contours.sortedByDescending { Imgproc.contourArea(it) }.take(16)) {
       val area=Imgproc.contourArea(contour)/(gray.cols().toDouble()*gray.rows())
-      if(area !in 0.14..0.94)continue
+      if(area !in 0.07..0.94)continue
       val curve=MatOfPoint2f(*contour.toArray());val approx=MatOfPoint2f()
       try {
        val perimeter=Imgproc.arcLength(curve,true)

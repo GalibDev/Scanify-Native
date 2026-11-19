@@ -68,7 +68,7 @@ internal fun NativeCameraScreen(
  val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it; requested = true }
  var front by rememberSaveable { mutableStateOf(false) }
  var resolution by rememberSaveable { mutableIntStateOf(0) }
- var selectedFilter by rememberSaveable { mutableStateOf("Original") }
+ var selectedFilter by rememberSaveable { mutableStateOf("Enhance") }
  var autoCapture by rememberSaveable { mutableStateOf(false) }
  var autoArmed by remember { mutableStateOf(true) }
  var autoCrop by rememberSaveable { mutableStateOf(true) }
@@ -180,14 +180,15 @@ internal fun NativeCameraScreen(
        val result = withContext(Dispatchers.IO) {
         val original = DocumentStore(context).bitmap(Uri.parse(uri))
         try {
-         val detected = shouldDetect && DocumentDetector.detect(original) != null
-         val filtered = ScanFilters.apply(original,filter)
+         val corners = if(shouldDetect) DocumentDetector.detect(original) else null
+         val corrected = if(corners!=null) PerspectiveCrop.correct(original,corners) else original
+         val filtered = try { ScanFilters.apply(corrected,filter) } catch(error:Exception) { if(corrected!==original)corrected.recycle();throw error }
          try {
           file.outputStream().use { check(filtered.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,it)) }
           val scale = minOf(1f,900f/maxOf(filtered.width,filtered.height))
           val thumbnail = android.graphics.Bitmap.createScaledBitmap(filtered,(filtered.width*scale).toInt().coerceAtLeast(1),(filtered.height*scale).toInt().coerceAtLeast(1),true)
-          Triple(detected, if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
-         } finally { if(filtered!==original)filtered.recycle() }
+          Triple(shouldDetect && corners==null, if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
+         } finally { if(filtered!==corrected)filtered.recycle();if(corrected!==original)corrected.recycle() }
         } finally { original.recycle() }
        }
        capturePreview = result.second
