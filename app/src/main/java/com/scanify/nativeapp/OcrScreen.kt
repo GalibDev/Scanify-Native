@@ -29,6 +29,9 @@ import kotlinx.coroutines.withContext
 internal fun OcrScreen(store:DocumentStore,pdf:File?,image:String?,adjustment:PageAdjustment,onClose:()->Unit) {
  val context=LocalContext.current
  val scope=rememberCoroutineScope()
+ val preferences=remember{context.getSharedPreferences("scanify-ocr",0)}
+ var language by rememberSaveable { mutableStateOf(runCatching{OcrLanguage.valueOf(preferences.getString("language","MIXED")!!)}.getOrDefault(OcrLanguage.MIXED)) }
+ var languageMenu by remember { mutableStateOf(false) }
  var source by rememberSaveable { mutableStateOf(image) }
  // Keep potentially large OCR results out of the saved-instance-state Bundle.
  var result by remember { mutableStateOf("") }
@@ -53,9 +56,9 @@ internal fun OcrScreen(store:DocumentStore,pdf:File?,image:String?,adjustment:Pa
   running=true;finished=false;status="Recognizing text…"
   scope.launch {
    try {
-    val text=if(pdf!=null)NativeOcr.pdf(pdf){page,total->withContext(Dispatchers.Main){status="Reading page $page of $total…"}}
-     else NativeOcr.image(store,Uri.parse(requireNotNull(source)),if(source==image)adjustment else PageAdjustment())
-    result=text;finished=true;status=if(text.isBlank())"No readable Latin text found. Try a sharper, upright photo." else "Text extracted. Check and correct any recognition mistakes."
+    val text=if(pdf!=null)NativeOcr.pdf(pdf,recognizeImage={BanglaOcr.recognize(context,it,language)}){page,total->withContext(Dispatchers.Main){status="Reading page $page of $total…"}}
+     else NativeOcr.image(store,Uri.parse(requireNotNull(source)),if(source==image)adjustment else PageAdjustment(),recognizeImage={BanglaOcr.recognize(context,it,language)})
+    result=text;finished=true;status=if(text.isBlank())"No readable text found. Try a sharper, upright photo." else "Text extracted. Check and correct any recognition mistakes."
    } catch(error:CancellationException){throw error}
    catch(_:Exception){status="Could not read this source. Check file access and try again."}
    finally{running=false}
@@ -67,8 +70,14 @@ internal fun OcrScreen(store:DocumentStore,pdf:File?,image:String?,adjustment:Pa
    IconButton(onClick=onClose){WebIcon("left",Modifier.size(24.dp),WebText,"Back from OCR")}
    Text("Extract Text",fontSize=22.sp)
   }
-  Text("Offline OCR · English / Latin script",color=Color(0xFF009E8D),fontSize=14.sp)
-  Text("Bangla is not supported in this version.",fontSize=12.sp,color=WebMuted)
+  Text("Offline OCR · বাংলা / English",color=Color(0xFF009E8D),fontSize=14.sp)
+  Box {
+   OutlinedButton(onClick={languageMenu=true},enabled=!running){Text("Language: "+language.label)}
+   DropdownMenu(expanded=languageMenu,onDismissRequest={languageMenu=false}) {
+    OcrLanguage.entries.forEach { option -> DropdownMenuItem(text={Text(option.label)},onClick={language=option;preferences.edit().putString("language",option.name).apply();languageMenu=false;finished=false;result="";status=""}) }
+   }
+  }
+  Text("Use a clear, upright image of printed text.",fontSize=12.sp,color=WebMuted)
   if(pdf!=null)Text("All PDF pages",fontSize=13.sp)
   else if(image!=null)Text("Current page with selected filter and rotation",fontSize=13.sp)
   Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {

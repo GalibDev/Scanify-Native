@@ -33,6 +33,25 @@ class StoreSmokeRunner : Instrumentation() {
    ocrCanvas.drawText("Invoice 12345",40f,240f,ocrPaint)
    val recognized=NativeOcr.recognize(ocrBitmap)
    check(recognized.contains("SCANIFY",true) && recognized.contains("12345")) { "OCR did not recognize generated text: $recognized" }
+   val banglaBitmap=Bitmap.createBitmap(1500,600,Bitmap.Config.ARGB_8888).apply{eraseColor(Color.WHITE)}
+   val banglaCanvas=android.graphics.Canvas(banglaBitmap)
+   val banglaPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply{color=Color.BLACK;textSize=76f;typeface=android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)}
+   banglaCanvas.drawText("আমার সোনার বাংলা",60f,150f,banglaPaint)
+   banglaCanvas.drawText("বাংলাদেশ একটি সুন্দর দেশ",60f,280f,banglaPaint)
+   banglaCanvas.drawText("Invoice 12345",60f,430f,banglaPaint)
+   val banglaText=BanglaOcr.recognize(targetContext,banglaBitmap,OcrLanguage.BANGLA)
+   check(banglaText.contains("বাংলা") && banglaText.contains("বাংলাদেশ")) { "Bangla OCR failed: $banglaText" }
+   val mixedText=BanglaOcr.recognize(targetContext,banglaBitmap,OcrLanguage.MIXED)
+   check(mixedText.contains("বাংলাদেশ") && mixedText.contains("Invoice") && mixedText.contains("12345")) { "Mixed OCR failed: $mixedText" }
+   val banglaSource=File(root,"bangla.png")
+   banglaSource.outputStream().use{banglaBitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+   val banglaDoc=store.create(listOf(Uri.fromFile(banglaSource)),"Bangla OCR",0,false)
+   val banglaPdfText=kotlinx.coroutines.runBlocking { NativeOcr.pdf(store.file(banglaDoc),recognizeImage={BanglaOcr.recognize(targetContext,it,OcrLanguage.MIXED)}){_,_->} }
+   check(banglaPdfText.contains("বাংলাদেশ") && banglaPdfText.contains("12345")) { "Bangla PDF OCR failed: $banglaPdfText" }
+   store.delete(banglaDoc)
+   banglaBitmap.eraseColor(Color.WHITE)
+   check(BanglaOcr.recognize(targetContext,banglaBitmap,OcrLanguage.MIXED).isBlank())
+   banglaBitmap.recycle()
    val ocrSource=File(root,"ocr.png")
    ocrSource.outputStream().use{ocrBitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
    ocrBitmap.eraseColor(Color.WHITE)
