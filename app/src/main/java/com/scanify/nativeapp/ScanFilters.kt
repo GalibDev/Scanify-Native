@@ -15,11 +15,6 @@ internal object ScanFilters {
   image.getPixels(pixels, 0, width, 0, 0, width, height)
   if (filter == "Omnifix" || filter == "Enhance") {
    PaperEnhancement.apply(pixels,width,height)
-   if(filter=="Enhance") for(i in pixels.indices) {
-    val p=pixels[i]
-    fun enhance(v:Int)=(((v-190f)*1.25f)+220f).roundToInt().coerceIn(0,255)
-    pixels[i]=Color.rgb(enhance(Color.red(p)),enhance(Color.green(p)),enhance(Color.blue(p)))
-   }
    return Bitmap.createBitmap(pixels,width,height,Bitmap.Config.ARGB_8888)
   }
   val tile = max(12, (max(width, height) / 24f).roundToInt())
