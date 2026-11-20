@@ -17,14 +17,29 @@ class DocumentAnalyzer(private val onResult:(List<CropPoint>?)->Unit):ImageAnaly
   try {
    val now=SystemClock.elapsedRealtime()
    if(!enabled)return
-   if(now-last<200)return
+   if(now-last<100)return
    last=now
    val plane=image.planes[0];val buffer=plane.buffer.duplicate();val base=buffer.position()
    val sample=max(1,(max(image.width,image.height)+511)/512)
    val width=image.width/sample;val height=image.height/sample
    val luma=ByteArray(width*height)
    for(y in 0 until height)for(x in 0 until width)luma[y*width+x]=buffer.get(base+y*sample*plane.rowStride+x*sample*plane.pixelStride)
-   val found=DocumentDetector.detectLuma(luma,width,height)
+   val neutral=luma.copyOf()
+   if(image.planes.size>=3) {
+    val u=image.planes[1];val v=image.planes[2]
+    val ub=u.buffer.duplicate();val vb=v.buffer.duplicate();val up=ub.position();val vp=vb.position()
+    for(y in 0 until height)for(x in 0 until width) {
+     val sx=x*sample/2;val sy=y*sample/2
+     val cb=(ub.get(up+sy*u.rowStride+sx*u.pixelStride).toInt() and 255)-128
+     val cr=(vb.get(vp+sy*v.rowStride+sx*v.pixelStride).toInt() and 255)-128
+     val light=luma[y*width+x].toInt() and 255
+     val r=(light+1.402*cr).coerceIn(0.0,255.0)
+     val g=(light-.344136*cb-.714136*cr).coerceIn(0.0,255.0)
+     val b=(light+1.772*cb).coerceIn(0.0,255.0)
+     if(maxOf(r,g,b)-minOf(r,g,b)>maxOf(r,g,b)*.28)neutral[y*width+x]=0
+    }
+   }
+   val found=DocumentDetector.detectLuma(neutral,width,height) ?: DocumentDetector.detectLuma(luma,width,height)
    val transform=sensorToView
    if(found==null||transform==null){onResult(null);return}
    val inverse=Matrix()

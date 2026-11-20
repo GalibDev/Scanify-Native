@@ -16,7 +16,11 @@ object DocumentDetector {
   val scale = minOf(1f, 1200f / max(bitmap.width, bitmap.height))
   val small = if (scale < 1f) Bitmap.createScaledBitmap(bitmap,(bitmap.width*scale).roundToInt(),(bitmap.height*scale).roundToInt(),true) else bitmap
   val rgba=Mat();val gray=Mat()
-  return try { Utils.bitmapToMat(small,rgba);Imgproc.cvtColor(rgba,gray,Imgproc.COLOR_RGBA2GRAY);detectGray(gray) }
+  return try { Utils.bitmapToMat(small,rgba);Imgproc.cvtColor(rgba,gray,Imgproc.COLOR_RGBA2GRAY);
+   val pixels=IntArray(small.width*small.height);small.getPixels(pixels,0,small.width,0,0,small.width,small.height)
+   val neutral=ByteArray(pixels.size){i->val p=pixels[i];val r=android.graphics.Color.red(p);val g=android.graphics.Color.green(p);val b=android.graphics.Color.blue(p);if(maxOf(r,g,b)-minOf(r,g,b)>maxOf(r,g,b)*.28f)0 else ((r*77+g*150+b*29) shr 8).toByte()}
+   val paper=Mat(small.height,small.width,CvType.CV_8UC1)
+   try{paper.put(0,0,neutral);detectGray(paper) ?: detectGray(gray)}finally{paper.release()} }
   finally { rgba.release();gray.release();if(small!==bitmap)small.recycle() }
  }
 
@@ -34,7 +38,9 @@ object DocumentDetector {
    Imgproc.Canny(blur,edges,40.0,120.0)
    Imgproc.morphologyEx(edges,edges,Imgproc.MORPH_CLOSE,kernel)
    Imgproc.threshold(blur,threshold,0.0,255.0,Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
-   for (mask in listOf(edges,threshold)) {
+   val exposureMasks=listOf(170.0,135.0,200.0).map{level->Mat().also{Imgproc.threshold(blur,it,level,255.0,Imgproc.THRESH_BINARY)}}
+   try {
+   for (mask in exposureMasks+listOf(edges,threshold)) {
     val contours=ArrayList<MatOfPoint>();val hierarchy=Mat()
     try {
      Imgproc.findContours(mask,contours,hierarchy,Imgproc.RETR_LIST,Imgproc.CHAIN_APPROX_SIMPLE)
@@ -64,6 +70,7 @@ object DocumentDetector {
      }
     } finally {contours.forEach{it.release()};hierarchy.release()}
    }
+   } finally { exposureMasks.forEach{it.release()} }
    return best
   } finally {blur.release();edges.release();threshold.release();kernel.release()}
  }
