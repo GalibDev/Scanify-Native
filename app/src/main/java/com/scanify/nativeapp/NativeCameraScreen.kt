@@ -164,6 +164,9 @@ internal fun NativeCameraScreen(
   capturing = true; error = ""; panel = ""; autoArmed = false
   controller.imageCaptureFlashMode = flashMode
   val finish = !batch || retaking
+  // Freeze outline and its matching preview together; still photos can use a different field of view.
+  val shutterOutline = outline?.toList()
+  val shutterPreview = if(autoCrop && shutterOutline!=null) preview.bitmap else null
   var output: File? = null
   try {
    val dir = File(context.cacheDir, "camera").apply { mkdirs() }
@@ -171,25 +174,29 @@ internal fun NativeCameraScreen(
    output = file
    controller.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), executor, object : ImageCapture.OnImageSavedCallback {
     override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-     if (!active.get()) { file.delete(); return }
+     if (!active.get()) { file.delete();shutterPreview?.recycle(); return }
      val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file).toString()
      val filter = selectedFilter
-     val shouldDetect = autoCrop && detectEnabled && detectionSupported
+     val shouldDetect = autoCrop
      scope.launch {
       try {
        val result = withContext(Dispatchers.IO) {
         val original = DocumentStore(context).bitmap(Uri.parse(uri))
         try {
          val corners = if(shouldDetect) DocumentDetector.detect(original) else null
-         val corrected = if(corners!=null) PerspectiveCrop.correct(original,corners) else original
+         val corrected = when {
+          corners!=null -> PerspectiveCrop.correct(original,corners)
+          shouldDetect && shutterOutline!=null && shutterPreview!=null -> PerspectiveCrop.correct(shutterPreview,shutterOutline)
+          else -> original
+         }
          val filtered = try { ScanFilters.apply(corrected,filter) } catch(error:Exception) { if(corrected!==original)corrected.recycle();throw error }
          try {
           file.outputStream().use { check(filtered.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,it)) }
           val scale = minOf(1f,900f/maxOf(filtered.width,filtered.height))
           val thumbnail = android.graphics.Bitmap.createScaledBitmap(filtered,(filtered.width*scale).toInt().coerceAtLeast(1),(filtered.height*scale).toInt().coerceAtLeast(1),true)
-          Triple(shouldDetect && corners==null, if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
+          Triple(shouldDetect && corners==null && (shutterOutline==null || shutterPreview==null), if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
          } finally { if(filtered!==corrected)filtered.recycle();if(corrected!==original)corrected.recycle() }
-        } finally { original.recycle() }
+        } finally { original.recycle();shutterPreview?.recycle() }
        }
        capturePreview = result.second
        delay(1100)
@@ -204,11 +211,11 @@ internal fun NativeCameraScreen(
      }
     }
     override fun onError(exception: ImageCaptureException) {
-     file.delete()
+     file.delete();shutterPreview?.recycle()
      if (active.get()) { capturing = false; error = "Photo capture failed. Please try again." }
     }
    })
-  } catch (_: Exception) { output?.delete(); capturing = false; error = "Could not capture a photo. Please try again." }
+  } catch (_: Exception) { output?.delete();shutterPreview?.recycle(); capturing = false; error = "Could not capture a photo. Please try again." }
  }
  val latestTakePhoto by rememberUpdatedState(::takePhoto)
  DisposableEffect(volumeCapture) {
