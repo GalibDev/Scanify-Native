@@ -184,9 +184,10 @@ internal fun NativeCameraScreen(
         val original = DocumentStore(context).bitmap(Uri.parse(uri))
         try {
          val corners = if(shouldDetect) DocumentDetector.detect(original) else null
+         val previewCorners = if(shouldDetect && shutterPreview!=null) DocumentDetector.detect(shutterPreview) ?: shutterOutline else null
          val corrected = when {
+          previewCorners!=null && shutterPreview!=null -> PerspectiveCrop.correct(shutterPreview,previewCorners)
           corners!=null -> PerspectiveCrop.correct(original,corners)
-          shouldDetect && shutterOutline!=null && shutterPreview!=null -> PerspectiveCrop.correct(shutterPreview,shutterOutline)
           else -> original
          }
          val filtered = try { ScanFilters.apply(corrected,filter) } catch(error:Exception) { if(corrected!==original)corrected.recycle();throw error }
@@ -194,12 +195,12 @@ internal fun NativeCameraScreen(
           file.outputStream().use { check(filtered.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,it)) }
           val scale = minOf(1f,900f/maxOf(filtered.width,filtered.height))
           val thumbnail = android.graphics.Bitmap.createScaledBitmap(filtered,(filtered.width*scale).toInt().coerceAtLeast(1),(filtered.height*scale).toInt().coerceAtLeast(1),true)
-          Triple(shouldDetect && corners==null && (shutterOutline==null || shutterPreview==null), if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
+          Triple(shouldDetect && corners==null && (previewCorners==null || shutterPreview==null), if(thumbnail===original || thumbnail===filtered) thumbnail.copy(android.graphics.Bitmap.Config.ARGB_8888,false) else thumbnail, uri)
          } finally { if(filtered!==corrected)filtered.recycle();if(corrected!==original)corrected.recycle() }
         } finally { original.recycle();shutterPreview?.recycle() }
        }
        capturePreview = result.second
-       delay(1100)
+       delay(1000)
        if(active.get()) {
         capturePreview=null
         capturing=false

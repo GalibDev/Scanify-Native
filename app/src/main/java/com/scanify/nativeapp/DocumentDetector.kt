@@ -63,7 +63,12 @@ object DocumentDetector {
         var maxCos=0.0
         for(i in 0..3){val a=ordered[(i+3)%4];val b=ordered[i];val c=ordered[(i+1)%4];val ux=a.x-b.x;val uy=a.y-b.y;val vx=c.x-b.x;val vy=c.y-b.y;maxCos=max(maxCos,abs((ux*vx+uy*vy)/max(1.0,hypot(ux,uy)*hypot(vx,vy))))}
         if(maxCos>0.72)continue
-        val score=area*(1.0-0.25*maxCos)
+        val polygon=MatOfPoint(*ordered.toTypedArray())
+        val quadArea=try{Imgproc.contourArea(polygon)}finally{polygon.release()}
+        val fill=Imgproc.contourArea(contour)/max(1.0,quadArea)
+        if(fill<0.82 || fill>1.18)continue
+        val centerDistance=hypot(cx/gray.cols()-.5,cy/gray.rows()-.5)
+        val score=area*(1.0-0.35*maxCos)*(1.0-0.35*centerDistance)*min(1.0,fill)
         if(score>bestScore){bestScore=score;best=points}
        }
       } finally {curve.release();approx.release()}
