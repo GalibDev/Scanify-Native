@@ -63,6 +63,7 @@ object DocumentDetector {
         var maxCos=0.0
         for(i in 0..3){val a=ordered[(i+3)%4];val b=ordered[i];val c=ordered[(i+1)%4];val ux=a.x-b.x;val uy=a.y-b.y;val vx=c.x-b.x;val vy=c.y-b.y;maxCos=max(maxCos,abs((ux*vx+uy*vy)/max(1.0,hypot(ux,uy)*hypot(vx,vy))))}
         if(maxCos>0.72)continue
+        if(ordered.indices.any{i->hypot(ordered[i].x-ordered[(i+1)%4].x,ordered[i].y-ordered[(i+1)%4].y)<min(gray.cols(),gray.rows())*.12})continue
         val polygon=MatOfPoint(*ordered.toTypedArray())
         val quadArea=try{Imgproc.contourArea(polygon)}finally{polygon.release()}
         val fill=Imgproc.contourArea(contour)/max(1.0,quadArea)
@@ -86,7 +87,7 @@ class DetectionTracker {
  private var previous:List<CropPoint>?=null
  private var hits=0;private var misses=0
  fun update(points:List<CropPoint>?):List<CropPoint>? {
-  if(points==null){misses++;if(misses>=3){previous=null;hits=0};return if(hits>=2)previous else null}
+  if(points==null){misses++;if(misses>=2){previous=null;hits=0};return if(hits>=3)previous else null}
   misses=0
   val old=previous
   val close=old!=null&&points.indices.all{hypot(points[it].x-old[it].x,points[it].y-old[it].y)<0.08f}

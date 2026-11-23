@@ -38,7 +38,7 @@ internal fun ScanReviewScreen(
  onName: (String) -> Unit, onBack: () -> Unit, onRemove: (Int) -> Unit, onRetake: (Int) -> Unit,
  onRotate: () -> Unit, onFilter: (String) -> Unit, onImport: () -> Unit, onSave: () -> Unit,
  onCrop: (Int) -> Unit, onUnavailable: (String) -> Unit, page: Int, onPage: (Int) -> Unit,
- onMove: (Int,Int) -> Unit, editing: Boolean = false
+ onMove: (Int,Int) -> Unit, onRestoreOriginal: () -> Unit, editing: Boolean = false
 ) {
  val current = page.coerceIn(0,pages.lastIndex)
  var compare by rememberSaveable(pages[current]) { mutableStateOf(false) }
@@ -81,6 +81,7 @@ internal fun ScanReviewScreen(
    Box {
     if(editing || pages.size>1)IconButton(onClick={pageMenu=true},enabled=!busy){WebIcon("more",Modifier.size(21.dp),WebText,"Page actions")}
     DropdownMenu(expanded=pageMenu,onDismissRequest={pageMenu=false}) {
+     DropdownMenuItem(text={Text("Restore Original Capture")},onClick={pageMenu=false;onRestoreOriginal()})
      DropdownMenuItem(text={Text("Retake")},onClick={pageMenu=false;onRetake(current)})
      DropdownMenuItem(text={Text("Move Earlier")},enabled=current>0,onClick={pageMenu=false;onMove(current,current-1)})
      DropdownMenuItem(text={Text("Move Later")},enabled=current<pages.lastIndex,onClick={pageMenu=false;onMove(current,current+1)})

@@ -267,9 +267,9 @@ class MainActivity : ComponentActivity() {
      }
     ) else if (cameraOpen) NativeCameraScreen(
      owner = this@MainActivity, pageCount = draft.size, retaking = retakeIndex >= 0, grayscale = grayscale,
-     onFilter = { grayscale = it }, onCaptured = { uri, finish, detected ->
+     onFilter = { grayscale = it }, onCaptured = { uri, finish, detected, captureFilter ->
       val capturedIndex = if (retakeIndex in draft.indices) retakeIndex else draft.size
-      adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment(grayscale=grayscale) else value}) else ArrayList(adjustments+PageAdjustment(grayscale=grayscale))
+      adjustments=if(retakeIndex in draft.indices)ArrayList(adjustments.mapIndexed{index,value->if(index==retakeIndex)PageAdjustment(filter=captureFilter) else value}) else ArrayList(adjustments+PageAdjustment(grayscale=grayscale))
       draft = if (retakeIndex in draft.indices) ArrayList(draft.mapIndexed { index, value -> if (index == retakeIndex) uri else value }) else ArrayList(draft + uri)
       retakeIndex = -1
       if (finish) { cameraOpen = false; reviewPage = capturedIndex; if(detected) cropIndex = capturedIndex }
@@ -283,6 +283,16 @@ class MainActivity : ComponentActivity() {
      onRotate = { val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(rotation=(value.rotation+270)%360)else value}) },
      onFilter = { filter -> val current=reviewPage.coerceIn(0,draft.lastIndex);adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)value.copy(grayscale=false,filter=filter)else value}) },
      onImport = { run { importOpen=true } }, onSave = ::saveScan, onCrop = { cropIndex = it }, onUnavailable = { if(it=="Extract Text")ocrOpen=true else unavailable = it }, page = reviewPage, onPage = { reviewPage = it },
+     onRestoreOriginal={
+      val current=reviewPage.coerceIn(0,draft.lastIndex)
+      val source=File(cacheDir,"camera/"+Uri.parse(draft[current]).lastPathSegment+".source")
+      val original=runCatching{File(source.readText())}.getOrNull()
+      if(original?.isFile==true){
+       val originalUri=FileProvider.getUriForFile(this@MainActivity,"$packageName.files",original).toString()
+       draft=ArrayList(draft.mapIndexed{i,value->if(i==current)originalUri else value})
+       adjustments=ArrayList(adjustments.mapIndexed{i,value->if(i==current)PageAdjustment() else value});cropIndex=current
+      }else notice("Original capture is unavailable for this page.")
+     },
      editing=editingId.isNotEmpty(),onMove={from,to->if(from in draft.indices && to in draft.indices){val reordered=ArrayList(draft);val item=reordered.removeAt(from);reordered.add(to,item);val edits=ArrayList(adjustments);edits.add(to,edits.removeAt(from));draft=reordered;adjustments=edits;reviewPage=to}}
     ) else if (selected != null) DocumentReaderScreen(
      selected, store.file(selected), onBack = { selectedId = "" },

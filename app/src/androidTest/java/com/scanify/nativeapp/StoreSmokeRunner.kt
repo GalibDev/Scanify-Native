@@ -286,8 +286,8 @@ class StoreSmokeRunner : Instrumentation() {
   android.graphics.Canvas(blank).drawCircle(250f,225f,140f,android.graphics.Paint().apply{color=Color.WHITE})
   check(DocumentDetector.detect(blank)==null) { "Circle must not detect as a page" }
   val tracker=DetectionTracker()
-  check(tracker.update(detected)==null);check(tracker.update(detected)!=null)
-  tracker.update(null);tracker.update(null);check(tracker.update(null)==null)
+  check(tracker.update(detected)==null);check(tracker.update(detected)==null);check(tracker.update(detected)!=null)
+  check(tracker.update(null)!=null);check(tracker.update(null)==null)
   check(tracker.update(detected)==null) { "Old outline must not reappear immediately" }
   // A padded Y plane with a nonzero ByteBuffer position exercises actual analyzer indexing.
   val rowStride=512;val bytes=ByteArray(7+rowStride*450)
