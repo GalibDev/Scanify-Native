@@ -139,7 +139,27 @@ class MainActivity : ComponentActivity() {
     finally { busy = false }
    }
   }
-  fun capture() { cameraOpen = true }
+  val googleScanLauncher=rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+   if(result.resultCode==RESULT_OK) {
+    val pages=com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult.fromActivityResultIntent(result.data)?.pages.orEmpty()
+    if(pages.isNotEmpty())acceptImages(pages.map{it.imageUri}) else notice("Scanner returned no pages. Please try again.")
+   }
+  }
+  fun capture() {
+   if(!BuildConfig.GOOGLE_SCANNER){cameraOpen=true;return}
+   if(busy)return
+   busy=true
+   val options=com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.Builder()
+    .setGalleryImportAllowed(true).setPageLimit(if(retakeIndex>=0)1 else 30)
+    .setResultFormats(com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+    .setScannerMode(com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER_MODE_FULL).build()
+   com.google.mlkit.vision.documentscanner.GmsDocumentScanning.getClient(options).getStartScanIntent(this@MainActivity)
+    .addOnSuccessListener { sender ->
+     busy=false
+     runCatching{googleScanLauncher.launch(androidx.activity.result.IntentSenderRequest.Builder(sender).build())}
+      .onFailure{notice("Could not open Google scanner. Check Google Play services and try again.")}
+    }.addOnFailureListener { busy=false;notice("Google scanner is unavailable. Update Google Play services, connect to the internet for first setup, and try again.") }
+  }
   fun share(doc: ScanDocument) { shareStatus="";shareId=doc.id }
   fun exportImages(doc:ScanDocument,photos:Boolean,longImage:Boolean=false,pageIndex:Int?=null) {
    if(busy)return
